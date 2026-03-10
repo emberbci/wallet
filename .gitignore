@@ -1,0 +1,15 @@
+dist/
+node_modules/
+.DS_Store
+*.log
+coverage/
+*.tsbuildinfo
+.env
+.env.local
+.env.*
+broadcast/
+contracts/broadcast/
+contracts/cache/
+contracts/out/
+cache/
+out/
