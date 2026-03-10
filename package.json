@@ -1,0 +1,27 @@
+{
+  "name": "minimal-sepolia-wallet-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A minimal popup-only Sepolia wallet browser extension.",
+  "scripts": {
+    "build": "node scripts/build-extension.mjs",
+    "dev": "vite",
+    "contracts:build": "forge build --root contracts",
+    "contracts:test": "forge test --root contracts",
+    "contracts:deploy:sepolia": "forge script contracts/script/DeployWalletFactory.s.sol:DeployWalletFactoryScript --rpc-url https://ethereum-sepolia-rpc.publicnode.com --broadcast"
+  },
+  "dependencies": {
+    "@lit-protocol/access-control-conditions": "^8.0.2",
+    "@lit-protocol/auth": "^8.2.3",
+    "@lit-protocol/auth-helpers": "^8.2.0",
+    "@lit-protocol/constants": "^9.0.1",
+    "@lit-protocol/encryption": "^7.4.0",
+    "@lit-protocol/lit-client": "^8.3.1",
+    "@lit-protocol/networks": "^8.4.1",
+    "viem": "^2.47.6"
+  },
+  "devDependencies": {
+    "vite": "^8.0.3"
+  }
+}
