@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Ember Wallet",
+  "version": "0.1.0",
+  "description": "A minimal Sepolia wallet for creating, importing, viewing, and sending assets.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://ethereum-sepolia-rpc.publicnode.com/*",
+    "https://rpc.sepolia.org/*",
+    "https://sepolia.gateway.tenderly.co/*",
+    "https://rpc2.sepolia.org/*",
+    "https://inference.impulselabs.ai/*",
+    "https://api.dev.litprotocol.com/*",
+    "https://dashboard.dev.litprotocol.com/*"
+  ],
+  "action": {
+    "default_popup": "dist/popup.html",
+    "default_title": "Ember Wallet",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "dist/background.js"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
