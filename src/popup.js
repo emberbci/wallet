@@ -996,3 +996,605 @@ function renderLoadingView() {
   `;
 }
 
+function renderOnboardingView() {
+  const step = state.onboardingStep;
+
+  if (step === "create-password") {
+    return `
+      <section class="recovery">
+        <div class="onboard-step-head">
+          <button class="icon-button" type="button" data-action="onboarding-back" aria-label="Back">‹</button>
+          <div>
+            <div class="eyebrow">New wallet</div>
+            <h2 class="view-title">Set a password</h2>
+          </div>
+        </div>
+        <p class="muted">Encrypts your vault locally</p>
+        <form data-form="create" class="form-grid">
+          <div class="field">
+            <label class="label" for="create-password">Password</label>
+            <input id="create-password" data-draft="createDraft" name="password" type="password" minlength="8" placeholder="Min 8 characters" value="${state.createDraft.password}" required />
+          </div>
+          <div class="field">
+            <label class="label" for="create-confirmPassword">Confirm password</label>
+            <input id="create-confirmPassword" data-draft="createDraft" name="confirmPassword" type="password" minlength="8" placeholder="Repeat your password" value="${state.createDraft.confirmPassword}" required />
+          </div>
+          <button class="primary-button" type="submit" ${state.isWorking ? "disabled" : ""}>
+            ${state.isWorking ? "Creating..." : "Create wallet"}
+          </button>
+        </form>
+      </section>
+    `;
+  }
+
+  if (step === "import-form") {
+    return `
+      <section class="recovery">
+        <div class="onboard-step-head">
+          <button class="icon-button" type="button" data-action="onboarding-back" aria-label="Back">‹</button>
+          <div>
+            <div class="eyebrow">Import wallet</div>
+            <h2 class="view-title">Enter your secret</h2>
+          </div>
+        </div>
+        <form data-form="import" class="form-grid">
+          <div class="field">
+            <label class="label" for="import-secret">Recovery phrase or private key</label>
+            <textarea id="import-secret" data-draft="importDraft" name="secret" placeholder="Enter a 12-word phrase or a 0x private key" required>${state.importDraft.secret}</textarea>
+          </div>
+          <div class="field">
+            <label class="label" for="import-password">Password</label>
+            <input id="import-password" data-draft="importDraft" name="password" type="password" minlength="8" placeholder="Min 8 characters" value="${state.importDraft.password}" required />
+          </div>
+          <div class="field">
+            <label class="label" for="import-confirmPassword">Confirm password</label>
+            <input id="import-confirmPassword" data-draft="importDraft" name="confirmPassword" type="password" minlength="8" placeholder="Repeat your password" value="${state.importDraft.confirmPassword}" required />
+          </div>
+          <button class="primary-button" type="submit" ${state.isWorking ? "disabled" : ""}>
+            ${state.isWorking ? "Importing..." : "Import wallet"}
+          </button>
+        </form>
+      </section>
+    `;
+  }
+
+  if (step === "restore-form") {
+    return `
+      <section class="recovery">
+        <div class="onboard-step-head">
+          <button class="icon-button" type="button" data-action="onboarding-back" aria-label="Back">‹</button>
+          <div>
+            <div class="eyebrow">Restore</div>
+            <h2 class="view-title">Restore backup</h2>
+          </div>
+        </div>
+        <p class="muted">Smart-wallet Lit config is preserved so discovered wallets stay send-capable.</p>
+        <form data-form="restore-backup" class="form-grid">
+          <div class="field">
+            <label class="label" for="restore-backup-file">Backup file (.json)</label>
+            <input
+              id="restore-backup-file"
+              type="file"
+              accept=".json,application/json,text/json"
+              data-file-kind="wallet-backup"
+            />
+            <div class="asset-note">
+              ${state.backupDraft.fileName || "Choose a previously exported Ember wallet backup JSON file."}
+            </div>
+          </div>
+          <button class="primary-button" type="submit" ${state.isWorking ? "disabled" : ""}>
+            ${state.isWorking ? "Restoring..." : "Restore from backup"}
+          </button>
+        </form>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="onboard-choose">
+      
+     
+      <div class="onboard-options">
+        <button class="onboard-option-card" data-action="onboarding-choose" data-step="create-password">
+          <span class="onboard-option-icon">+</span>
+          <span class="onboard-option-body">
+            <span class="onboard-option-title">Create a new wallet</span>
+            <span class="onboard-option-desc">Generate a fresh seed phrase</span>
+          </span>
+          <span class="onboard-option-arrow">›</span>
+        </button>
+        <button class="onboard-option-card" data-action="onboarding-choose" data-step="import-form">
+          <span class="onboard-option-icon">↑</span>
+          <span class="onboard-option-body">
+            <span class="onboard-option-title">Import existing wallet</span>
+            <span class="onboard-option-desc">Use a seed phrase or private key</span>
+          </span>
+          <span class="onboard-option-arrow">›</span>
+        </button>
+        <button class="onboard-option-card" data-action="onboarding-choose" data-step="restore-form">
+          <span class="onboard-option-icon">⊕</span>
+          <span class="onboard-option-body">
+            <span class="onboard-option-title">Restore from backup</span>
+            <span class="onboard-option-desc">Load an encrypted backup file</span>
+          </span>
+          <span class="onboard-option-arrow">›</span>
+        </button>
+      </div>
+    </section>
+  `;
+}
+
+function renderUnlockView() {
+  return `
+    <div class="unlock-page">
+      <div class="unlock-topbar">
+        <span class="unlock-brand">Ember</span>
+      </div>
+      <div class="unlock-logo-wrap">
+        <img class="unlock-logo" src="/icons/logo.png" alt="Wallet logo" />
+      </div>
+      <div class="unlock-bottom">
+        <h2 class="unlock-title">Enter your password</h2>
+        <form data-form="unlock" class="unlock-form">
+          <input
+            id="unlock-password"
+            class="unlock-input"
+            data-draft="unlockDraft"
+            name="password"
+            type="password"
+            minlength="8"
+            placeholder="Password"
+            value="${state.unlockDraft.password}"
+            required
+          />
+          <button class="unlock-btn" type="submit" ${state.isWorking ? "disabled" : ""}>
+            ${state.isWorking ? "Unlocking..." : "Unlock"}
+          </button>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
+function renderRecoveryView() {
+  const words = state.recoveryPhrase ? state.recoveryPhrase.trim().split(/\s+/) : [];
+  const isRevealed = state.phraseRevealed;
+  const wordGrid = words
+    .map(
+      (word, i) =>
+        `<div class="recovery-word"><span class="recovery-word-num">${i + 1}</span><span class="recovery-word-text">${escapeHtml(word)}</span></div>`,
+    )
+    .join("");
+  const blurOverlay = isRevealed
+    ? ""
+    : `<div class="recovery-blur-overlay"><button class="recovery-reveal-btn" type="button" data-action="toggle-phrase">Tap to reveal</button></div>`;
+
+  return `
+    <section class="recovery">
+      <div class="onboard-step-head">
+        <div>
+          <div class="eyebrow">New wallet · Step 2</div>
+          <h2 class="view-title">Recovery phrase</h2>
+        </div>
+      </div>
+      <p class="muted">Write these ${words.length} words down in order and store them somewhere safe and offline.</p>
+      <div class="recovery-phrase-wrap">
+        <div class="recovery-word-grid${isRevealed ? "" : " is-blurred"}">${wordGrid}</div>
+        ${blurOverlay}
+        <button class="recovery-copy-btn" type="button" data-action="copy-phrase">${state.phraseCopied ? "✓ Copied!" : "Copy phrase"}</button>
+      </div>
+      <div class="recovery-warning">
+        <span class="recovery-warning-icon">⚠</span>
+        <span>Never share your recovery phrase. Anyone with these words can access your funds.</span>
+      </div>
+      <button class="primary-button" data-action="finish-recovery"${isRevealed ? "" : " disabled"}>
+        I stored it safely
+      </button>
+    </section>
+  `;
+}
+
+function renderAssetRows(assets, { renderAction } = {}) {
+  if (!assets.length) {
+    return `<div class="empty-state">Balances will appear here after the wallet is unlocked.</div>`;
+  }
+
+  return assets
+    .map(
+      (asset) => `
+        <div class="asset-row">
+          <div class="asset-name">
+            <div class="asset-symbol">${asset.symbol}</div>
+          </div>
+          <div class="asset-balance-col">
+            <div class="asset-balance">${asset.displayBalance}</div>
+            <div class="asset-note">${asset.error ?? "Available now"}</div>
+          </div>
+          <div class="asset-subname">
+            <div class="asset-note">${asset.name}${asset.type === "token" ? ` · ${shortAddress(asset.address)}` : ""}</div>
+            ${
+              typeof renderAction === "function"
+                ? `<div class="asset-row-actions">${renderAction(asset) ?? ""}</div>`
+                : ""
+            }
+          </div>
+        </div>
+      `,
+    )
+    .join("");
+}
+
+function renderSendRecipientSuggestions() {
+  const recents = state.recentRecipients
+    .map((address) => ({
+      address,
+      label: shortAddress(address),
+      note: "Previous transaction",
+      tone: "recent",
+    }))
+    .filter((entry, index, array) => array.findIndex((item) => item.address.toLowerCase() === entry.address.toLowerCase()) === index);
+
+  const renderItem = (entry) => `
+    <button class="send-contact-row" type="button" data-action="send-flow-select-recipient" data-recipient="${entry.address}">
+      <span class="send-contact-avatar send-contact-avatar--${entry.tone}" aria-hidden="true">${escapeHtml(entry.label.slice(0, 1).toUpperCase())}</span>
+      <span class="send-contact-copy">
+        <span class="send-contact-title">${escapeHtml(entry.label)}</span>
+        <span class="send-contact-note">${escapeHtml(entry.note)}</span>
+      </span>
+    </button>
+  `;
+
+  return `
+    <div class="send-contact-sections">
+      <section class="send-contact-section">
+        <h3>◔ Recents</h3>
+        ${recents.length ? recents.map(renderItem).join("") : '<div class="send-section-empty">No recent recipients yet.</div>'}
+      </section>
+    </div>
+  `;
+}
+
+function renderSendFlowRecipientStep() {
+  const canContinue = Boolean(state.sendDraft.recipient.trim());
+
+  return `
+    <section class="send-flow-stage send-screen send-screen--recipient">
+      <div class="send-input-wrap">
+        <label class="send-input-label" for="send-flow-recipient">To</label>
+        <input
+          id="send-flow-recipient"
+          data-draft="sendDraft"
+          name="recipient"
+          type="text"
+          placeholder="0x..."
+          value="${escapeHtml(state.sendDraft.recipient)}"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <button class="send-inline-pill" type="button" data-action="send-flow-paste">Paste</button>
+      </div>
+
+      ${renderSendRecipientSuggestions()}
+
+      <div class="send-footer">
+        <button class="primary-button send-flow-continue" type="button" data-action="send-flow-next-recipient" ${canContinue ? "" : "disabled"}>
+          Continue
+        </button>
+      </div>
+    </section>
+  `;
+}
+
+function renderSendFlowAssetStep() {
+  const recipient = state.sendDraft.recipient.trim();
+  const tokensMarkup =
+    state.assets.length > 0
+      ? state.assets
+          .map((asset) => {
+            const isSelected = asset.id === state.sendDraft.assetId;
+            return `
+              <button
+                class="send-token-row ${isSelected ? "is-selected" : ""}"
+                type="button"
+                data-action="send-flow-select-asset"
+                data-asset-id="${asset.id}"
+              >
+                <span class="send-token-icon">${escapeHtml(asset.symbol.slice(0, 2).toUpperCase())}</span>
+                <span class="send-token-meta">
+                  <span class="send-token-symbol">${escapeHtml(asset.name)}</span>
+                  <span class="send-token-balance">${escapeHtml(asset.displayBalance)} ${escapeHtml(asset.symbol)}</span>
+                </span>
+                <span class="send-token-value">${isSelected ? "Selected" : `$${escapeHtml(asset.displayBalance)}`}</span>
+              </button>
+            `;
+          })
+          .join("")
+      : '<div class="send-section-empty">No assets loaded yet. Refresh balances first.</div>';
+
+  return `
+    <section class="send-flow-stage send-screen send-screen--assets">
+      <div class="send-input-wrap send-input-wrap--pill" data-action="send-flow-edit-recipient" role="button" tabindex="0">
+        <span class="send-input-label">To</span>
+        <span class="send-recipient-pill">${escapeHtml(shortAddress(recipient))}</span>
+      </div>
+      <div class="send-token-list">${tokensMarkup}</div>
+    </section>
+  `;
+}
+
+function renderSendFlowAmountStep() {
+  const selectedAsset = getSelectedAsset();
+  const amount = state.sendDraft.amount || "0";
+  const hasValidAmount = isValidAmount(state.sendDraft.amount);
+  const recipient = state.sendDraft.recipient.trim();
+
+  return `
+    <section class="send-flow-stage send-screen send-screen--amount send-flow-stage--amount">
+      <div class="send-input-wrap send-input-wrap--pill" data-action="send-flow-edit-recipient" role="button" tabindex="0">
+        <span class="send-input-label">To</span>
+        <span class="send-recipient-pill">${escapeHtml(shortAddress(recipient))}</span>
+      </div>
+      <div class="send-amount-wrap">
+        <input
+          class="send-amount-input"
+          id="send-flow-amount"
+          data-draft="sendDraft"
+          name="amount"
+          type="text"
+          inputmode="decimal"
+          placeholder="0"
+          value="${escapeHtml(state.sendDraft.amount)}"
+          autocomplete="off"
+          autofocus
+        />
+      </div>
+      <div class="send-selected-asset" data-action="send-flow-change-asset" role="button" tabindex="0">
+        <span class="send-token-icon">${escapeHtml(selectedAsset?.symbol?.slice(0, 2).toUpperCase() ?? "A")}</span>
+        <span class="send-token-meta">
+          <span class="send-token-symbol">${escapeHtml(selectedAsset?.name ?? "No asset selected")}</span>
+          <span class="send-token-balance">${escapeHtml(selectedAsset?.displayBalance ?? "0")} ${escapeHtml(selectedAsset?.symbol ?? "")}</span>
+        </span>
+        <button class="send-inline-pill" type="button" data-action="send-flow-use-max" ${selectedAsset ? "" : "disabled"}>
+          Use Max
+        </button>
+      </div>
+      <div class="send-footer">
+        <button class="primary-button send-flow-continue" type="button" data-action="send-flow-review" ${hasValidAmount ? "" : "disabled"}>
+          Continue
+        </button>
+      </div>
+    </section>
+  `;
+}
+
+function renderSendFlowConfirmStep() {
+  const selectedAsset = getSelectedAsset();
+  const recipient = state.sendDraft.recipient.trim();
+  const amount = state.sendDraft.amount.trim();
+
+  return `
+    <section class="send-flow-stage send-screen send-screen--confirm send-flow-stage--confirm">
+      <h3 class="send-confirm-title">Confirm send to ${escapeHtml(shortAddress(recipient))}</h3>
+      <div class="send-confirm-grid">
+        <div class="send-confirm-row send-confirm-row--headline"><span>Total Value</span><strong>$${escapeHtml(amount || "0")}</strong></div>
+        <div class="send-confirm-row"><span>Send ${escapeHtml(selectedAsset?.symbol ?? "Asset")}</span><strong>${escapeHtml(amount)} ${escapeHtml(selectedAsset?.symbol ?? "")}</strong></div>
+        <div class="send-confirm-row"><span>From</span><strong>${escapeHtml(shortAddress(state.session?.account?.address ?? ""))}</strong></div>
+      </div>
+      <div class="send-fee-box">
+        <div>
+          <strong>$0.05</strong>
+          <span>Fee Estimate</span>
+        </div>
+        <div class="send-fee-box-meta">
+          <strong>Normal</strong>
+          <span>~ 45 Secs</span>
+        </div>
+      </div>
+      <p class="send-confirm-note">Review the details before confirming. Transactions on-chain are irreversible.</p>
+      <div class="send-footer">
+        <button class="primary-button send-flow-continue" type="button" data-action="send-flow-confirm" ${state.sendFlow.status === "pending" ? "disabled" : ""}>
+          ${state.sendFlow.status === "pending" ? "Starting..." : "Confirm"}
+        </button>
+      </div>
+    </section>
+  `;
+}
+
+function renderSendFlowProcessingStep() {
+  if (state.sendFlow.status === "success") {
+    return `
+      <section class="send-flow-stage send-screen send-flow-stage--processing">
+        <div class="send-processing-icon send-processing-icon--success">✓</div>
+        <h3>Transaction Sent</h3>
+        <p>${escapeHtml(state.sendFlow.detail || "Your transfer has been submitted and confirmed.")}</p>
+        <div class="send-processing-actions">
+          ${
+            state.sendFlow.txLink
+              ? `<a class="secondary-button send-link-button" href="${state.sendFlow.txLink}" target="_blank" rel="noreferrer">View transaction</a>`
+              : ""
+          }
+          <button class="primary-button send-flow-continue" type="button" data-action="send-flow-done">Done</button>
+        </div>
+      </section>
+    `;
+  }
+
+  if (state.sendFlow.status === "error") {
+    return `
+      <section class="send-flow-stage send-screen send-flow-stage--processing">
+        <div class="send-processing-icon send-processing-icon--error">!</div>
+        <h3>Transaction Failed</h3>
+        <p>${escapeHtml(state.sendFlow.detail || "We could not submit this transfer. Please review details and try again.")}</p>
+        <button class="primary-button send-flow-continue" type="button" data-action="send-flow-back">
+          Back to review
+        </button>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="send-flow-stage send-screen send-flow-stage--processing send-flow-stage--processing-pending">
+      <div class="send-processing-icon">➤</div>
+      <h3>Starting Your Transaction</h3>
+      <p>Just a moment.</p>
+      <div class="send-processing-spacer"></div>
+      <div class="spinner send-flow-spinner" aria-hidden="true"></div>
+    </section>
+  `;
+}
+
+function renderSendFlow() {
+  if (!state.sendFlow.isOpen) {
+    return "";
+  }
+
+  const step = state.sendFlow.step;
+  const showBack = step === "confirm";
+  const showClose = step !== "processing" || state.sendFlow.status !== "pending";
+  const showHelp = step === "confirm";
+  const hideHeader = step === "processing" && state.sendFlow.status === "pending";
+
+  const stageMarkup =
+    step === "recipient"
+      ? renderSendFlowRecipientStep()
+      : step === "asset"
+        ? renderSendFlowAssetStep()
+        : step === "amount"
+          ? renderSendFlowAmountStep()
+          : step === "confirm"
+            ? renderSendFlowConfirmStep()
+            : renderSendFlowProcessingStep();
+
+  return `
+    <div class="send-flow-overlay">
+      <div class="send-flow-panel">
+        ${
+          hideHeader
+            ? ""
+            : `<header class="send-flow-head">
+              ${
+                showBack
+                  ? '<button class="icon-button" type="button" data-action="send-flow-back" aria-label="Back">‹</button>'
+                  : '<span class="send-flow-spacer"></span>'
+              }
+              <h2>Send</h2>
+              ${
+                showHelp
+                  ? '<button class="icon-button icon-button--ghost" type="button" data-action="send-flow-help" aria-label="Help">?</button>'
+                  : showClose
+                    ? '<button class="icon-button" type="button" data-action="close-send-flow" aria-label="Close">✕</button>'
+                    : '<span class="send-flow-spacer"></span>'
+              }
+            </header>`
+        }
+        <div class="send-flow-body">
+          ${stageMarkup}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderSmartWalletCards() {
+  if (!state.smartWallets.length) {
+    return `
+      <div class="empty-state">
+        <div>
+          <div>No smart wallets discovered yet.</div>
+          <div class="asset-note">Create a Lit-backed wallet below or refresh after deploying one from the configured factory.</div>
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="smart-wallet-list">
+      ${state.smartWallets
+        .map((smartWallet) => {
+          const isSelected = smartWallet.walletAddress === state.selectedSmartWalletAddress;
+          const modeLabel = canExecuteSmartWallet(smartWallet)
+            ? "Ready to send"
+            : smartWallet.kind === "lit"
+              ? "Needs local Lit config"
+              : "Legacy";
+
+          return `
+            <article class="smart-wallet-card ${isSelected ? "is-selected" : ""}">
+              <div class="smart-wallet-head">
+                <div>
+                  <div class="asset-symbol">2-of-2 Smart Wallet</div>
+                  <a class="address-link" href="${EXPLORER_ADDRESS_BASE_URL}${smartWallet.walletAddress}" target="_blank" rel="noreferrer">
+                    ${shortAddress(smartWallet.walletAddress)}
+                  </a>
+                </div>
+                <div class="smart-wallet-meta">
+                  <span class="status-badge ${smartWallet.deployed ? "status-badge--live" : "status-badge--pending"}">
+                    ${smartWallet.deployed ? "Deployed" : "Pending"}
+                  </span>
+                  <span class="asset-note">${modeLabel}</span>
+                </div>
+              </div>
+              <div class="owners-list">
+                ${smartWallet.owners
+                  .map(
+                    (owner, index) => `
+                      <div class="owner-chip">
+                        <span class="owner-index">Signer ${index + 1}</span>
+                        <a class="address-link" href="${EXPLORER_ADDRESS_BASE_URL}${owner}" target="_blank" rel="noreferrer">
+                          ${shortAddress(owner)}
+                        </a>
+                      </div>
+                    `,
+                  )
+                  .join("")}
+              </div>
+              ${
+                smartWallet.litConfig
+                  ? `<div class="asset-note">PKP ${shortAddress(smartWallet.litConfig.pkpEthAddress)} · Action ${smartWallet.litConfig.actionIpfsCid.slice(0, 10)}...</div>`
+                  : `<div class="asset-note">Factory ${shortAddress(smartWallet.sourceFactory)} · Salt ${smartWallet.salt.slice(0, 10)}...</div>`
+              }
+              <div class="action-row">
+                <button class="secondary-button" type="button" data-action="select-smart-wallet" data-wallet="${smartWallet.walletAddress}">
+                  ${isSelected ? "Opened" : "Open"}
+                </button>
+              </div>
+            </article>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function renderSmartWalletDiscoverySection() {
+  return `
+    <section class="section">
+      <div class="section-head">
+        <h2>Discovered wallets</h2>
+        <div class="hint">${state.smartWallets.length} found</div>
+      </div>
+      <div class="asset-note">Click Open to load that wallet, view assets, and send from that wallet.</div>
+      <div class="wallet-picker-scroll">
+        ${renderSmartWalletCards()}
+      </div>
+    </section>
+  `;
+}
+
+function renderSkeletonRows(count = 3) {
+  return Array.from({ length: count })
+    .map(
+      () => `
+        <div class="dash-skeleton-row">
+          <div class="dash-skeleton-avatar"></div>
+          <div class="dash-skeleton-info">
+            <div class="dash-skeleton-line" style="width:88px;height:14px"></div>
+            <div class="dash-skeleton-line" style="width:52px;height:11px;margin-top:5px"></div>
+          </div>
+          <div class="dash-skeleton-right">
+            <div class="dash-skeleton-line" style="width:64px;height:14px"></div>
+            <div class="dash-skeleton-line" style="width:36px;height:11px;margin-top:5px"></div>
+          </div>
+        </div>
+      `,
+    )
