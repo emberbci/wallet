@@ -1598,3 +1598,772 @@ function renderSkeletonRows(count = 3) {
         </div>
       `,
     )
+    .join("");
+}
+
+function renderDashTokenRows(assets) {
+  if (state.isRefreshing && !assets.length) {
+    return renderSkeletonRows(3);
+  }
+
+  if (!assets.length) {
+    return `<div class="dash-empty">${state.isDiscoveringTokens ? 'Syncing\u2026' : 'No tokens yet. Tap + to add one.'}</div>`;
+  }
+
+  return assets
+    .map(
+      (asset) => `
+        <div class="dash-token-row">
+          <div class="dash-token-avatar">${escapeHtml(asset.symbol.slice(0, 1))}</div>
+          <div class="dash-token-info">
+            <div class="dash-token-name">${escapeHtml(asset.name)}</div>
+            <div class="dash-token-sub">${escapeHtml(asset.symbol)}${asset.type === "token" ? ` · ${shortAddress(asset.address)}` : " · Sepolia"}</div>
+          </div>
+          <div class="dash-token-right">
+            <div class="dash-token-bal">${escapeHtml(asset.displayBalance)}</div>
+            <div class="dash-token-bal-note">${asset.error ? escapeHtml(asset.error) : escapeHtml(asset.symbol)}</div>
+          </div>
+          <button class="token-send-btn" type="button" data-action="open-send-flow" data-asset-id="${asset.id}" title="Send ${escapeHtml(asset.symbol)}">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          </button>
+        </div>
+      `,
+    )
+    .join("");
+}
+
+function renderAddTokenSheet() {
+  if (!state.addTokenOpen) return "";
+  return `
+    <div class="add-token-sheet">
+      <div class="add-token-sheet-head">
+        <span class="label">Add ERC-20 token</span>
+        <button class="icon-button icon-button--ghost" type="button" data-action="toggle-add-token">✕</button>
+      </div>
+      <form data-form="add-token" class="form-grid">
+        <div class="field">
+          <input
+            id="token-address"
+            data-draft="addTokenDraft"
+            name="address"
+            type="text"
+            placeholder="Token contract address (0x...)"
+            value="${state.addTokenDraft.address}"
+            required
+          />
+        </div>
+        <button class="primary-button" type="submit" ${state.isWorking ? "disabled" : ""}>
+          ${state.isWorking ? "Loading..." : "Add token"}
+        </button>
+      </form>
+    </div>
+  `;
+}
+
+function renderSmartWalletSendProgress() {
+  const progress = state.smartWalletSendProgress;
+  if (!progress.visible) {
+    return "";
+  }
+
+  const summary = progress.summary ? `<div class="asset-note">${escapeHtml(progress.summary)}</div>` : "";
+  return `
+    <div class="progress-timeline-wrap">
+      <div class="section-head">
+        <h2>Transfer progress</h2>
+        <div class="hint progress-hint progress-hint--${progress.status}">${escapeHtml(progress.status)}</div>
+      </div>
+      ${summary}
+      <div class="progress-timeline">
+        ${progress.steps
+          .map(
+            (step) => `
+              <div class="progress-step progress-step--${step.status}">
+                <div class="progress-step-label">${escapeHtml(step.label)}</div>
+                <div class="progress-step-status">${escapeHtml(step.status)}${step.detail ? ` · ${escapeHtml(step.detail)}` : ""}</div>
+              </div>
+            `,
+          )
+          .join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderSelectedSmartWalletSection() {
+  const smartWallet = getSelectedSmartWallet();
+  if (!smartWallet) {
+    return "";
+  }
+  const selectedAsset = getSelectedSmartWalletAsset();
+  const csvPreview = getTopCsvPreview(state.smartWalletSendDraft.csvText);
+
+  const canSend = canExecuteSmartWallet(smartWallet);
+
+  return `
+    <section class="section">
+      <div class="section-head">
+        <h2>Wallet</h2>
+        <div class="hint">
+          ${
+            state.isSmartWalletAssetsLoading
+              ? "Loading assets..."
+              : canSend
+                ? "Opened for sends"
+                : "View only"
+          }
+        </div>
+      </div>
+      <article class="smart-wallet-card is-selected">
+        <div class="smart-wallet-head">
+          <div>
+            <div class="asset-symbol">2-of-2 Smart Wallet</div>
+            <a class="address-link" href="${EXPLORER_ADDRESS_BASE_URL}${smartWallet.walletAddress}" target="_blank" rel="noreferrer">
+              ${shortAddress(smartWallet.walletAddress)}
+            </a>
+          </div>
+          <div class="smart-wallet-meta">
+            <span class="status-badge ${smartWallet.deployed ? "status-badge--live" : "status-badge--pending"}">
+              ${smartWallet.deployed ? "Deployed" : "Pending"}
+            </span>
+            <span class="asset-note">${canSend ? "Ready to send" : "View only"}</span>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Assets</h2>
+        <div class="hint">${state.smartWalletAssets.length} tracked</div>
+      </div>
+      <div class="asset-list">
+        ${renderAssetRows(state.smartWalletAssets)}
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Send</h2>
+        <div class="hint">Send from selected smart-wallet asset</div>
+      </div>
+      ${
+        canSend
+          ? `
+            <form data-form="smart-wallet-send" class="form-grid">
+              <div class="field">
+                <label class="label">Selected asset</label>
+                <div class="asset-send-target">
+                  ${
+                    selectedAsset
+                      ? `${escapeHtml(selectedAsset.symbol)} · ${escapeHtml(selectedAsset.displayBalance)}`
+                      : state.isSmartWalletAssetsLoading || state.isDiscoveringTokens
+                        ? "Loading wallet assets..."
+                        : "Select an asset from the list above."
+                  }
+                </div>
+                <div class="asset-note">Click Send next to any asset above to choose what to transfer.</div>
+              </div>
+              <div class="field">
+                <label class="label" for="smart-send-recipient">Recipient</label>
+                <input id="smart-send-recipient" data-draft="smartWalletSendDraft" name="recipient" type="text" placeholder="0x..." value="${state.smartWalletSendDraft.recipient}" required />
+              </div>
+              <div class="field">
+                <label class="label" for="smart-send-amount">Amount</label>
+                <input id="smart-send-amount" data-draft="smartWalletSendDraft" name="amount" type="text" inputmode="decimal" placeholder="0.0" value="${state.smartWalletSendDraft.amount}" required />
+              </div>
+              <div class="field">
+                <label class="label" for="smart-csv-upload">CSV features</label>
+                <input id="smart-csv-upload" name="csvUpload" type="file" accept=".csv,text/csv" data-file-kind="smart-wallet-csv" />
+                <div class="asset-note">${state.smartWalletSendDraft.csvFileName || "Upload any CSV with feature headers. The top data row is used automatically."}</div>
+                <label class="label" for="smart-eeg-simulated">Simulated EEG Aid</label>
+                <select
+                  id="smart-eeg-simulated"
+                  data-draft="smartWalletSendDraft"
+                  name="simulatedEmotion"
+                >
+                  ${renderSimulatedEegOptions()}
+                </select>
+                <div class="asset-note">Choose an emotion profile to auto-generate a test CSV for this transaction attempt.</div>
+                ${
+                  csvPreview?.ok
+                    ? `<div class="asset-note">Using top row from ${csvPreview.dataRowCount} data row(s): ${escapeHtml(csvPreview.summary)}</div>`
+                    : csvPreview?.error
+                      ? `<div class="asset-note">CSV issue: ${escapeHtml(csvPreview.error)}</div>`
+                      : ""
+                }
+              </div>
+              <div class="action-row">
+                <button class="primary-button" type="submit" ${state.isWorking || state.isSmartWalletAssetsLoading || !selectedAsset ? "disabled" : ""}>
+                  ${
+                    state.isWorking
+                      ? "Processing transfer..."
+                      : selectedAsset
+                        ? `Send ${escapeHtml(selectedAsset.symbol)}`
+                        : "Choose asset to send"
+                  }
+                </button>
+              </div>
+            </form>
+            ${renderSmartWalletSendProgress()}
+          `
+          : `
+            <div class="empty-state">
+              <div>
+                <div>This wallet is view-only in the current build.</div>
+                <div class="asset-note">Legacy wallets stay discoverable, but only Chipotle-backed wallets with encrypted Lit metadata can submit transactions.</div>
+              </div>
+            </div>
+            ${renderSmartWalletSendProgress()}
+          `
+      }
+    </section>
+  `;
+}
+
+function renderWalletCreatedOverlay() {
+  if (!state.walletCreatedOverlay.visible) return "";
+  return `
+    <div class="wallet-success-overlay">
+      <div class="wallet-success-card">
+        <div class="wallet-success-icon">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+        </div>
+        <div class="wallet-success-title">Wallet Created</div>
+        <div class="wallet-success-addr">${shortAddress(state.walletCreatedOverlay.address)}</div>
+      </div>
+    </div>
+  `;
+}
+
+function renderSwSendFlowRecipientStep() {
+  const canContinue = Boolean(state.smartWalletSendDraft.recipient.trim());
+  return `
+    <section class="send-flow-stage send-screen send-screen--recipient">
+      <div class="send-input-wrap">
+        <label class="send-input-label" for="sw-send-recipient">To</label>
+        <input
+          id="sw-send-recipient"
+          data-draft="smartWalletSendDraft"
+          name="recipient"
+          type="text"
+          placeholder="0x..."
+          value="${escapeHtml(state.smartWalletSendDraft.recipient)}"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <button class="send-inline-pill" type="button" data-action="sw-send-flow-paste">Paste</button>
+      </div>
+      <div class="send-footer">
+        <button class="primary-button send-flow-continue" type="button" data-action="sw-send-flow-next-recipient" ${canContinue ? "" : "disabled"}>
+          Continue
+        </button>
+      </div>
+    </section>
+  `;
+}
+
+function renderSwSendFlowAssetStep() {
+  const recipient = state.smartWalletSendDraft.recipient.trim();
+  const tokensMarkup = state.smartWalletAssets.length > 0
+    ? state.smartWalletAssets.map((asset) => {
+        const isSelected = asset.id === state.smartWalletSendDraft.assetId;
+        return `
+          <button class="send-token-row ${isSelected ? "is-selected" : ""}" type="button"
+            data-action="sw-send-flow-select-asset" data-asset-id="${asset.id}">
+            <span class="send-token-icon">${escapeHtml(asset.symbol.slice(0, 2).toUpperCase())}</span>
+            <span class="send-token-meta">
+              <span class="send-token-symbol">${escapeHtml(asset.name)}</span>
+              <span class="send-token-balance">${escapeHtml(asset.displayBalance)} ${escapeHtml(asset.symbol)}</span>
+            </span>
+            <span class="send-token-value">${isSelected ? "Selected" : escapeHtml(asset.displayBalance)}</span>
+          </button>
+        `;
+      }).join("")
+    : '<div class="send-section-empty">No assets loaded yet. Refresh balances first.</div>';
+  return `
+    <section class="send-flow-stage send-screen send-screen--assets">
+      <div class="send-input-wrap send-input-wrap--pill">
+        <span class="send-input-label">To</span>
+        <span class="send-recipient-pill">${escapeHtml(shortAddress(recipient))}</span>
+      </div>
+      <div class="send-token-list">${tokensMarkup}</div>
+    </section>
+  `;
+}
+
+function renderSwSendFlowAmountStep() {
+  const selectedAsset = getSelectedSmartWalletAsset();
+  const hasValidAmount = isValidAmount(state.smartWalletSendDraft.amount);
+  const recipient = state.smartWalletSendDraft.recipient.trim();
+  return `
+    <section class="send-flow-stage send-screen send-screen--amount send-flow-stage--amount">
+      <div class="send-input-wrap send-input-wrap--pill">
+        <span class="send-input-label">To</span>
+        <span class="send-recipient-pill">${escapeHtml(shortAddress(recipient))}</span>
+      </div>
+      <div class="send-amount-wrap">
+        <input
+          class="send-amount-input"
+          id="sw-send-amount"
+          data-draft="smartWalletSendDraft"
+          name="amount"
+          type="text"
+          inputmode="decimal"
+          placeholder="0"
+          value="${escapeHtml(state.smartWalletSendDraft.amount)}"
+          autocomplete="off"
+          autofocus
+        />
+      </div>
+      <div class="send-selected-asset">
+        <span class="send-token-icon">${escapeHtml(selectedAsset?.symbol?.slice(0, 2).toUpperCase() ?? "A")}</span>
+        <span class="send-token-meta">
+          <span class="send-token-symbol">${escapeHtml(selectedAsset?.name ?? "No asset selected")}</span>
+          <span class="send-token-balance">${escapeHtml(selectedAsset?.displayBalance ?? "0")} ${escapeHtml(selectedAsset?.symbol ?? "")}</span>
+        </span>
+        <button class="send-inline-pill" type="button" data-action="sw-send-flow-use-max" ${selectedAsset ? "" : "disabled"}>Use Max</button>
+      </div>
+      <div class="send-footer">
+        <button class="primary-button send-flow-continue" type="button" data-action="sw-send-flow-next-amount" ${hasValidAmount ? "" : "disabled"}>
+          Continue
+        </button>
+      </div>
+    </section>
+  `;
+}
+
+function renderSwSendFlowCsvStep() {
+  const selectedAsset = getSelectedSmartWalletAsset();
+  const recipient = state.smartWalletSendDraft.recipient.trim();
+  const amount = state.smartWalletSendDraft.amount.trim();
+  const simulatedEmotion = state.smartWalletSendDraft.simulatedEmotion;
+  const hasSimulatedProfile = Boolean(simulatedEmotion && simulatedEmotion !== "manual");
+  const fallbackSimulated = hasSimulatedProfile ? simulatedCsvForEmotion(simulatedEmotion) : null;
+  const effectiveCsvText = state.smartWalletSendDraft.csvText || fallbackSimulated?.csvText || "";
+  const csvPreview = getTopCsvPreview(effectiveCsvText);
+  const hasCsvInput = !!csvPreview?.ok || hasSimulatedProfile;
+  const canSend = !state.isWorking && !state.isSmartWalletAssetsLoading && !!selectedAsset && hasCsvInput;
+  return `
+    <section class="send-flow-stage send-screen">
+      <div class="send-confirm-grid">
+        <div class="send-confirm-row"><span>To</span><strong>${escapeHtml(shortAddress(recipient))}</strong></div>
+        <div class="send-confirm-row"><span>Asset</span><strong>${escapeHtml(selectedAsset?.symbol ?? "")}</strong></div>
+        <div class="send-confirm-row"><span>Amount</span><strong>${escapeHtml(amount)} ${escapeHtml(selectedAsset?.symbol ?? "")}</strong></div>
+      </div>
+      <div class="field" style="margin-top:16px">
+        <label class="send-input-label" for="sw-csv-upload">CSV features</label>
+        <input id="sw-csv-upload" name="csvUpload" type="file" accept=".csv,text/csv" data-file-kind="smart-wallet-csv" />
+        <div class="asset-note">${escapeHtml(state.smartWalletSendDraft.csvFileName || "Upload any CSV with feature headers. The top data row is used automatically.")}</div>
+        ${csvPreview?.ok ? `<div class="asset-note">Using top row from ${csvPreview.dataRowCount} data row(s): ${escapeHtml(csvPreview.summary)}</div>` : ""}
+        ${csvPreview?.error ? `<div class="asset-note">CSV issue: ${escapeHtml(csvPreview.error)}</div>` : ""}
+      </div>
+      <div class="field">
+        <label class="send-input-label" for="sw-eeg-simulated">Simulated EEG Aid</label>
+        <select id="sw-eeg-simulated" data-draft="smartWalletSendDraft" name="simulatedEmotion">
+          ${renderSimulatedEegOptions()}
+        </select>
+        <div class="asset-note">Choose an emotion profile to auto-generate a test CSV for this transaction attempt.</div>
+      </div>
+      <div class="send-footer">
+        <button class="primary-button" type="button" data-action="sw-send-flow-confirm" ${canSend ? "" : "disabled"}>
+          Send ${escapeHtml(selectedAsset?.symbol ?? "")}
+        </button>
+      </div>
+    </section>
+  `;
+}
+
+function renderSwSendFlowProcessingStep() {
+  const flow = state.smartWalletSendFlow;
+  if (flow.status === "success") {
+    return `
+      <section class="send-flow-stage send-screen send-flow-stage--processing">
+        <div class="send-processing-icon send-processing-icon--success">✓</div>
+        <h3>Transaction Successful</h3>
+        <p>Your transfer has been confirmed on-chain.</p>
+        <div class="send-processing-actions">
+          ${flow.txLink ? `<a class="secondary-button send-link-button" href="${flow.txLink}" target="_blank" rel="noreferrer">View transaction</a>` : ""}
+          <button class="primary-button send-flow-continue" type="button" data-action="sw-send-flow-done">Done</button>
+        </div>
+      </section>
+    `;
+  }
+  if (flow.status === "error") {
+    return `
+      <section class="send-flow-stage send-screen send-flow-stage--processing">
+        <div class="send-processing-icon send-processing-icon--error">!</div>
+        <h3>Transaction Failed</h3>
+        <p>${escapeHtml(flow.detail || "The transfer could not be completed. Please review and try again.")}</p>
+        <button class="primary-button send-flow-continue" type="button" data-action="sw-send-flow-back">
+          Back to review
+        </button>
+      </section>
+    `;
+  }
+  const progress = state.smartWalletSendProgress;
+  if (!progress.visible) {
+    return `
+      <section class="send-flow-stage send-screen send-flow-stage--processing send-flow-stage--processing-pending">
+        <div class="send-processing-icon">➤</div>
+        <h3>Starting Your Transaction</h3>
+        <p>Just a moment.</p>
+        <div class="send-processing-spacer"></div>
+        <div class="spinner send-flow-spinner" aria-hidden="true"></div>
+      </section>
+    `;
+  }
+  return `
+    <div class="sw-progress-fullscreen">
+      ${renderSmartWalletSendProgress()}
+    </div>
+  `;
+}
+
+function renderSmartWalletSendSheet() {
+  if (!state.smartWalletSendOpen) return "";
+
+  const flow = state.smartWalletSendFlow;
+  const step = flow.step;
+  const isPendingProcessing = step === "processing" && flow.status === "pending";
+  const showBack = step === "asset" || step === "amount" || step === "csv" ||
+    (step === "processing" && flow.status === "error");
+  const showClose = !isPendingProcessing;
+
+  const stageMarkup = step === "recipient"
+    ? renderSwSendFlowRecipientStep()
+    : step === "asset"
+      ? renderSwSendFlowAssetStep()
+      : step === "amount"
+        ? renderSwSendFlowAmountStep()
+        : step === "csv"
+          ? renderSwSendFlowCsvStep()
+          : renderSwSendFlowProcessingStep();
+
+  return `
+    <div class="send-flow-overlay">
+      <div class="send-flow-panel">
+        <header class="send-flow-head">
+          ${showBack
+            ? '<button class="icon-button" type="button" data-action="sw-send-flow-back" aria-label="Back">‹</button>'
+            : '<span class="send-flow-spacer"></span>'
+          }
+          <h2>Send</h2>
+          ${showClose
+            ? '<button class="icon-button" type="button" data-action="close-smart-wallet-send" aria-label="Close">✕</button>'
+            : '<span class="send-flow-spacer"></span>'
+          }
+        </header>
+        <div class="send-flow-body">
+          ${stageMarkup}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderSmartWalletWalletView() {
+  const smartWallet = getSelectedSmartWallet();
+  if (!smartWallet) return "";
+
+  const canSend = canExecuteSmartWallet(smartWallet);
+
+  const copyIcon = state.smartWalletAddressCopied
+    ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`
+    : `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+
+  const litConfig = smartWallet.litConfig;
+  const expanded = state.smartWalletHeaderExpanded;
+  const pkpAddress = litConfig?.pkpEthAddress;
+  const ipfsCid = litConfig?.actionIpfsCid;
+
+  const headerLeft = expanded
+    ? `<div class="sw-wallet-header-left">
+        <button class="sw-wallet-addr sw-wallet-addr--clickable" type="button" data-action="toggle-smart-wallet-header" title="Show wallet address">${shortAddress(smartWallet.walletAddress)}</button>
+        <div class="sw-wallet-meta-rows">
+          ${pkpAddress
+            ? `<div class="sw-wallet-meta-row">
+                <span class="sw-wallet-meta-label">PKP</span>
+                <a class="sw-wallet-meta-value address-link" href="${EXPLORER_ADDRESS_BASE_URL}${pkpAddress}" target="_blank" rel="noreferrer">${shortAddress(pkpAddress)}</a>
+              </div>`
+            : ""}
+          ${ipfsCid
+            ? `<div class="sw-wallet-meta-row">
+                <span class="sw-wallet-meta-label">Action</span>
+                <a class="sw-wallet-meta-value address-link" href="https://ipfs.io/ipfs/${escapeHtml(ipfsCid)}" target="_blank" rel="noreferrer">${escapeHtml(ipfsCid.slice(0, 12))}…</a>
+              </div>`
+            : ""}
+        </div>
+      </div>`
+    : `<div class="sw-wallet-header-left">
+        <div class="sw-wallet-address-row">
+          <button class="sw-wallet-addr sw-wallet-addr--clickable" type="button" data-action="toggle-smart-wallet-header" title="Show Lit details">${shortAddress(smartWallet.walletAddress)}</button>
+          <button class="dash-copy-btn" type="button" data-action="copy-smart-wallet-address" title="Copy address">${copyIcon}</button>
+        </div>
+      </div>`;
+
+  return `
+    <div class="sw-wallet-view">
+      <section class="section">
+        <div class="sw-wallet-header-card">
+          ${headerLeft}
+          <span class="status-badge ${smartWallet.deployed ? "status-badge--live" : "status-badge--pending"}">
+            Smart Wallet
+          </span>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <h2>Assets</h2>
+          <div class="hint">${state.isSmartWalletAssetsLoading ? "Loading…" : `${state.smartWalletAssets.length} tracked`}</div>
+        </div>
+        <div class="asset-list">
+          ${renderAssetRows(state.smartWalletAssets)}
+        </div>
+      </section>
+
+    </div>
+  `;
+}
+
+function renderSmartWalletPanel(address) {
+  if (state.smartWalletView === "wallet" && state.selectedSmartWalletAddress) {
+    return renderSmartWalletWalletView();
+  }
+
+  const featureEnabled = smartWalletFeatureReady();
+
+  return `
+    <section class="section">
+      <div class="section-head">
+        <h2>Create with Lit</h2>
+        <div class="hint">PKP as signer two</div>
+      </div>
+      <form data-form="smart-wallet" class="form-grid">
+        <div class="field">
+          <label class="label" for="smart-owner1">Signer one</label>
+          <input id="smart-owner1" type="text" value="${address}" disabled />
+        </div>
+        <div class="asset-note">This creates a 2-of-2 multi-sig smart wallet with equal authority: your current EOA signer and one Lit PKP signer (50/50).</div>
+        <div class="asset-note">Inside a Lit Action, Impulse AI runs the inference policy check, and Lit PKP only signs when that policy passes.</div>
+        <div class="asset-note">Keep some Sepolia ETH in your main EOA wallet because it pays gas to create and execute smart-wallet transactions.</div>
+        <div class="field">
+          <label class="label" for="smart-litAccountApiKey">Lit master account API key</label>
+          <input
+            id="smart-litAccountApiKey"
+            data-draft="smartWalletDraft"
+            name="litAccountApiKey"
+            type="password"
+            placeholder="Paste the Chipotle master key or Bearer token"
+            value="${state.smartWalletDraft.litAccountApiKey}"
+            required
+          />
+          <div class="asset-note">This setup flow needs the dashboard account key with management permissions.</div>
+          <div class="asset-note">Get your Lit account key from <a class="address-link" href="https://dashboard.dev.litprotocol.com/" target="_blank" rel="noreferrer">dashboard.dev.litprotocol.com</a>.</div>
+          
+        </div>
+        <div class="field">
+          <label class="label" for="smart-deploymentId">Impulse deployment ID</label>
+          <input
+            id="smart-deploymentId"
+            data-draft="smartWalletDraft"
+            name="deploymentId"
+            type="text"
+            placeholder="sync-bd6cb3046188"
+            value="${state.smartWalletDraft.deploymentId}"
+            required
+          />
+          <div class="asset-note">Get deployment IDs from <a class="address-link" href="https://app.impulselabs.ai/" target="_blank" rel="noreferrer">app.impulselabs.ai</a>.</div>
+        </div>
+        <div class="field">
+          <label class="label" for="smart-apiKey">Impulse API key</label>
+          <input
+            id="smart-apiKey"
+            data-draft="smartWalletDraft"
+            name="apiKey"
+            type="password"
+            placeholder="Enter the inference API key"
+            value="${state.smartWalletDraft.apiKey}"
+            required
+          />
+          <div class="asset-note">Create your Impulse API key in <a class="address-link" href="https://app.impulselabs.ai/" target="_blank" rel="noreferrer">app.impulselabs.ai</a>.</div>
+          
+        </div>
+        <div class="action-row">
+          <button class="primary-button" type="submit" ${state.isWorking || !featureEnabled ? "disabled" : ""}>
+            ${featureEnabled ? (state.isWorking ? "Creating..." : "Create smart wallet") : "Factory not configured"}
+          </button>
+        </div>
+        ${
+          featureEnabled
+            ? ""
+            : '<div class="asset-note">Deploy the upgraded factory on Sepolia, then update src/smart-wallet-deployment.js with the new factory address and deployment block before creating Lit-backed wallets.</div>'
+        }
+      </form>
+    </section>
+  `;
+}
+
+function renderDashboardView() {
+  const address = state.session?.account.address ?? state.walletMeta?.address ?? "";
+  const isSmartWalletMode = state.homeTab === "smart-wallets" && !!state.selectedSmartWalletAddress;
+  const nativeAsset = isSmartWalletMode
+    ? (state.smartWalletAssets.find((a) => a.type === "native") ?? state.smartWalletAssets[0])
+    : state.assets[0];
+  const balance = nativeAsset?.displayBalance ?? "0";
+
+  const assetsContent = `
+    ${renderAddTokenSheet()}
+    <div class="dash-tab-pane">
+      ${state.isDiscoveringTokens && !state.assets.length && !state.isRefreshing ? '<div class="dash-syncing">Syncing tokens…</div>' : ""}
+      <div class="dash-token-list">${renderDashTokenRows(state.assets)}</div>
+    </div>
+  `;
+
+  const sendAction = isSmartWalletMode ? "open-smart-wallet-send-from-top" : "open-send-flow";
+  const sendDisabled = isSmartWalletMode
+    ? !state.smartWalletAssets.length || !canExecuteSmartWallet(getSelectedSmartWallet())
+    : !state.assets.length;
+  const networkTag = isSmartWalletMode
+    ? `Smart Wallet${state.isSmartWalletAssetsLoading ? " · Loading…" : ""}`
+    : `Sepolia${state.isRefreshing ? " · Refreshing…" : ""}`;
+
+  return `
+    <div class="dash-view">
+      <div class="dash-balance-wrap">
+        <div class="dash-balance-amount">${escapeHtml(balance)} <span class="dash-balance-sym">ETH</span></div>
+        <div class="dash-network-tag">${networkTag}</div>
+      </div>
+
+      <div class="dash-quick-actions">
+        <button class="dash-action-btn" type="button" data-action="${sendAction}" ${sendDisabled ? "disabled" : ""}>
+          <span class="dash-action-icon-wrap">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          </span>
+          <span>Send</span>
+        </button>
+      </div>
+
+      <div class="dash-tabs-bar">
+        <div class="dash-tabs-left">
+          <button class="dash-tab-btn ${state.homeTab === "assets" ? "is-active" : ""}" data-action="switch-home-tab" data-tab="assets">EOA</button>
+          <button class="dash-tab-btn ${state.homeTab === "smart-wallets" ? "is-active" : ""}" data-action="switch-home-tab" data-tab="smart-wallets">Smart Wallets</button>
+        </div>
+        ${state.homeTab === "assets" ? `
+          <button class="dash-add-btn" type="button" data-action="toggle-add-token" title="Add token">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+        ` : ""}
+      </div>
+
+      <div class="dash-tab-content">
+        ${state.homeTab === "assets" ? assetsContent : renderSmartWalletPanel(address)}
+      </div>
+    </div>
+  `;
+}
+
+function renderMenuOverlay() {
+  if (!state.menuOpen) return "";
+
+  if (state.homeTab === "smart-wallets") {
+    return `
+      <div class="menu-overlay">
+        <button class="menu-backdrop" type="button" data-action="close-menu" aria-label="Close menu"></button>
+        <div class="menu-panel">
+          <div class="menu-head">
+            <span class="menu-title">Smart Wallets</span>
+            <button class="icon-button" type="button" data-action="close-menu">✕</button>
+          </div>
+          <div class="menu-section">
+            <div class="menu-section-label">Developer Mode</div>
+            <label class="toggle-row menu-item">
+              <div>
+                <div class="label">Verbose step logging</div>
+                <div class="asset-note">Log each Lit and smart-wallet step, plus the response payload that caused a failure.</div>
+              </div>
+              <input type="checkbox" data-setting="developerMode" ${state.developerMode ? "checked" : ""} />
+            </label>
+            ${renderDebugLog()}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="menu-overlay">
+      <button class="menu-backdrop" type="button" data-action="close-menu" aria-label="Close menu"></button>
+      <div class="menu-panel">
+        <div class="menu-head">
+          <span class="menu-title">Settings</span>
+          <button class="icon-button" type="button" data-action="close-menu">✕</button>
+        </div>
+        <div class="menu-section">
+          <div class="menu-section-label">Backup</div>
+          <button class="menu-item" type="button" data-action="export-backup" ${state.isWorking ? "disabled" : ""}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span>Export encrypted backup</span>
+          </button>
+        </div>
+        <div class="menu-section">
+          <div class="menu-section-label">Restore</div>
+          <form data-form="import-backup" class="menu-restore-form">
+            <label class="menu-file-label" for="menu-backup-file">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              <span>${state.backupDraft.fileName || "Choose backup file"}</span>
+              <input id="menu-backup-file" type="file" accept=".json,application/json,text/json" data-file-kind="wallet-backup" class="visually-hidden" />
+            </label>
+            <button class="menu-item menu-item--cta" type="submit" ${state.isWorking || !state.backupDraft.text ? "disabled" : ""}>
+              ${state.isWorking ? "Restoring…" : "Restore from backup"}
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function render() {
+  if (state.view === "unlock") {
+    app.innerHTML = `
+      <div class="shell">
+        ${renderUnlockView()}
+        ${renderMenuOverlay()}
+      </div>
+    `;
+    return;
+  }
+
+  const viewMarkup = {
+    loading: renderLoadingView(),
+    onboarding: renderOnboardingView(),
+    unlock: renderUnlockView(),
+    recovery: renderRecoveryView(),
+    dashboard: renderDashboardView(),
+  }[state.view];
+
+  app.innerHTML = `
+    <div class="shell">
+      <div class="frame">
+        ${renderTopbar()}
+        ${renderStatus()}
+        ${viewMarkup}
+      </div>
+      ${renderSendFlow()}
+      ${renderSmartWalletSendSheet()}
+      ${renderMenuOverlay()}
+      ${renderWalletCreatedOverlay()}
+    </div>
+  `;
+}
+
+function collectDiscoveryWalletAddresses() {
+  const unique = new Map();
+
+  if (state.session?.account?.address) {
+    unique.set(state.session.account.address.toLowerCase(), state.session.account.address);
+  }
