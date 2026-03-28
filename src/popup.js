@@ -2367,3 +2367,1502 @@ function collectDiscoveryWalletAddresses() {
   if (state.session?.account?.address) {
     unique.set(state.session.account.address.toLowerCase(), state.session.account.address);
   }
+
+  state.smartWallets.forEach((smartWallet) => {
+    if (!smartWallet.deployed) {
+      return;
+    }
+
+    unique.set(smartWallet.walletAddress.toLowerCase(), smartWallet.walletAddress);
+  });
+
+  return [...unique.values()];
+}
+
+async function refreshDiscoveredTokens({
+  onProgressEvent,
+  throwOnError = false,
+} = {}) {
+  if (!state.session) {
+    return;
+  }
+
+  const walletAddresses = collectDiscoveryWalletAddresses();
+  if (!walletAddresses.length) {
+    return;
+  }
+
+  try {
+    const discovery = await discoverTokensForWallets({
+      walletAddresses,
+      knownTokens: state.tokens,
+      cursors: state.tokenDiscoveryCursors,
+      onProgressEvent,
+    });
+
+    state.tokens = discovery.tokens;
+    state.tokenDiscoveryCursors = discovery.cursors;
+    await saveTokens(state.tokens);
+    await saveTokenDiscoveryCursors(state.tokenDiscoveryCursors);
+  } catch (error) {
+    if (throwOnError) {
+      throw error;
+    }
+
+    setNotice({
+      error: error instanceof Error ? error.message : "Could not discover wallet tokens.",
+    });
+  }
+}
+
+async function refreshPortfolio({ preserveNotice = false, throwOnError = false } = {}) {
+  if (!state.session) {
+    return;
+  }
+
+  state.isRefreshing = true;
+  if (!preserveNotice) {
+    clearNotice();
+  }
+  render();
+
+  try {
+    state.assets = await loadPortfolio(state.session.account.address, state.tokens);
+    ensureSelectedAsset();
+  } catch (error) {
+    if (throwOnError) {
+      throw error;
+    }
+
+    setNotice({
+      error: error instanceof Error ? error.message : "Could not refresh balances.",
+    });
+  } finally {
+    state.isRefreshing = false;
+    render();
+  }
+}
+
+async function refreshSelectedSmartWalletPortfolio({ preserveNotice = true, throwOnError = false } = {}) {
+  const smartWallet = getSelectedSmartWallet();
+  state.isSmartWalletAssetsLoading = true;
+  render();
+
+  if (!smartWallet?.deployed) {
+    state.smartWalletAssets = [];
+    state.isSmartWalletAssetsLoading = false;
+    render();
+    return;
+  }
+
+  if (!preserveNotice) {
+    clearNotice();
+  }
+
+  try {
+    state.smartWalletAssets = await loadPortfolio(smartWallet.walletAddress, state.tokens);
+    ensureSelectedSmartWalletAsset();
+  } catch (error) {
+    state.smartWalletAssets = [];
+    if (throwOnError) {
+      throw error;
+    }
+
+    setNotice({
+      error: error instanceof Error ? error.message : "Could not refresh smart wallet balances.",
+    });
+  } finally {
+    state.isSmartWalletAssetsLoading = false;
+    render();
+  }
+}
+
+async function refreshSmartWallets({ preserveNotice = false } = {}) {
+  if (!state.session) {
+    return;
+  }
+
+  state.isRefreshing = true;
+  if (!preserveNotice) {
+    clearNotice();
+  }
+  render();
+
+  try {
+    const discovered = await discoverSmartWalletsForSigner(state.session.account.address);
+    state.smartWallets = mergeWalletVaults(
+      mergeSmartWalletRecords([...state.smartWallets, ...discovered]),
+      state.session.payload,
+    );
+    ensureSelectedSmartWallet();
+    await saveSmartWallets(serializeSmartWalletsForStorage(state.smartWallets));
+    await refreshSelectedSmartWalletPortfolio({ preserveNotice: true });
+  } catch (error) {
+    setNotice({
+      error: error instanceof Error ? error.message : "Could not refresh smart wallets.",
+    });
+  } finally {
+    state.isRefreshing = false;
+    render();
+  }
+}
+
+async function refreshDiscoveredTokensAndBalances({ preserveNotice = true } = {}) {
+  if (!state.session || state.isDiscoveringTokens) {
+    return;
+  }
+
+  state.isDiscoveringTokens = true;
+  if (!preserveNotice) {
+    clearNotice();
+  }
+  render();
+
+  try {
+    await refreshDiscoveredTokens();
+    await refreshPortfolio({ preserveNotice: true });
+    await refreshSelectedSmartWalletPortfolio({ preserveNotice: true });
+  } finally {
+    state.isDiscoveringTokens = false;
+    render();
+  }
+}
+
+async function refreshDashboard({ preserveNotice = false, waitForDiscovery = false } = {}) {
+  await refreshPortfolio({ preserveNotice });
+  await refreshSmartWallets({ preserveNotice: true });
+
+  if (waitForDiscovery) {
+    await refreshDiscoveredTokensAndBalances({ preserveNotice: true });
+    return;
+  }
+
+  void refreshDiscoveredTokensAndBalances({ preserveNotice: true });
+}
+
+async function refreshWalletTokensAndBalancesForTransfer(onProgressEvent) {
+  handleSmartWalletProgressEvent({
+    step: "refreshAssets",
+    status: "running",
+  });
+
+  await refreshDiscoveredTokens({
+    onProgressEvent,
+    throwOnError: true,
+  });
+  await refreshPortfolio({
+    preserveNotice: true,
+    throwOnError: true,
+  });
+  await refreshSelectedSmartWalletPortfolio({
+    preserveNotice: true,
+    throwOnError: true,
+  });
+  handleSmartWalletProgressEvent({
+    step: "refreshAssets",
+    status: "success",
+  });
+}
+
+async function openDashboardFromPayload(payload, password) {
+  const nextPayload = withWalletDefaults(payload);
+  state.session = {
+    payload: nextPayload,
+    account: accountFromVault(nextPayload),
+    password,
+  };
+  // Persist session so popup can reopen without re-unlock for 10 minutes
+  saveUnlockSession({ payload: nextPayload, password }).catch(() => {});
+  state.smartWallets = mergeWalletVaults(state.smartWallets, nextPayload);
+  ensureSelectedSmartWallet();
+  state.smartWalletView = state.selectedSmartWalletAddress ? "wallet" : "create";
+  state.isDiscoveringTokens = false;
+  state.isSmartWalletAssetsLoading = false;
+  state.sendFlow = createEmptySendFlow();
+  state.smartWalletSendProgress = createSmartWalletSendProgress();
+  state.view = "dashboard";
+  state.recoveryPhrase = "";
+  clearNotice();
+  render();
+  await refreshDashboard();
+}
+
+async function persistWallet(payload, password, { showRecovery = false } = {}) {
+  const nextPayload = withWalletDefaults(payload);
+  const encrypted = await encryptVault(nextPayload, password);
+
+  if (showRecovery) {
+    // Don't write to storage yet — wait for the user to confirm they stored
+    // the recovery phrase. Keep the encrypted bundle in memory.
+    state.pendingVaultBundle = {
+      vault: encrypted.vault,
+      vaultMeta: encrypted.vaultMeta,
+    };
+    state.walletMeta = encrypted.vaultMeta;
+    state.tokens = [];
+    state.tokenDiscoveryCursors = {};
+    state.assets = [];
+    state.isDiscoveringTokens = false;
+    state.smartWalletAssets = [];
+    state.isSmartWalletAssetsLoading = false;
+    state.smartWallets = [];
+    state.selectedSmartWalletAddress = "";
+    state.homeTab = "assets";
+    state.sendDraft = { assetId: "native", recipient: "", amount: "" };
+    state.sendFlow = createEmptySendFlow();
+    state.recentRecipients = [];
+    state.smartWalletSendDraft = {
+      assetId: "native",
+      recipient: "",
+      amount: "",
+      csvText: "",
+      csvFileName: "",
+      simulatedEmotion: "manual",
+    };
+    state.backupDraft = { text: "", fileName: "" };
+    state.smartWalletSendProgress = createSmartWalletSendProgress();
+    state.session = {
+      payload: nextPayload,
+      account: accountFromVault(nextPayload),
+      password,
+    };
+    state.recoveryPhrase = nextPayload.mnemonic;
+    state.phraseRevealed = false;
+    state.phraseCopied = false;
+    state.view = "recovery";
+    clearNotice();
+    render();
+    return;
+  }
+
+  await saveWalletBundle({
+    vault: encrypted.vault,
+    vaultMeta: encrypted.vaultMeta,
+    tokens: [],
+    smartWallets: [],
+    tokenDiscoveryCursors: {},
+    recentRecipients: [],
+  });
+
+  state.walletMeta = encrypted.vaultMeta;
+  state.tokens = [];
+  state.tokenDiscoveryCursors = {};
+  state.assets = [];
+  state.isDiscoveringTokens = false;
+  state.smartWalletAssets = [];
+  state.isSmartWalletAssetsLoading = false;
+  state.smartWallets = [];
+  state.selectedSmartWalletAddress = "";
+  state.homeTab = "assets";
+  state.sendDraft = {
+    assetId: "native",
+    recipient: "",
+    amount: "",
+  };
+  state.sendFlow = createEmptySendFlow();
+  state.recentRecipients = [];
+  state.smartWalletSendDraft = {
+    assetId: "native",
+    recipient: "",
+    amount: "",
+    csvText: "",
+    csvFileName: "",
+    simulatedEmotion: "manual",
+  };
+  state.backupDraft = {
+    text: "",
+    fileName: "",
+  };
+  state.smartWalletSendProgress = createSmartWalletSendProgress();
+
+  await openDashboardFromPayload(nextPayload, password);
+}
+
+async function handleCreate() {
+  const { password, confirmPassword } = state.createDraft;
+
+  if (password !== confirmPassword) {
+    throw new Error("Passwords do not match.");
+  }
+
+  const payload = createMnemonicWallet();
+  await persistWallet(payload, password, { showRecovery: true });
+  state.createDraft = { password: "", confirmPassword: "" };
+}
+
+async function handleImport() {
+  const { secret, password, confirmPassword } = state.importDraft;
+
+  if (password !== confirmPassword) {
+    throw new Error("Passwords do not match.");
+  }
+
+  const payload = importWallet(secret);
+  await persistWallet(payload, password);
+  state.importDraft = { secret: "", password: "", confirmPassword: "" };
+}
+
+async function handleUnlock() {
+  const stored = await readWalletBundle();
+  const password = state.unlockDraft.password;
+  const payload = withWalletDefaults(
+    await decryptVault(stored.vault, stored.vaultMeta, password),
+  );
+
+  state.walletMeta = stored.vaultMeta;
+  state.tokens = stored.tokens;
+  state.tokenDiscoveryCursors = stored.tokenDiscoveryCursors ?? {};
+  state.recentRecipients = Array.isArray(stored.recentRecipients) ? stored.recentRecipients : [];
+  state.smartWallets = mergeWalletVaults(stored.smartWallets, payload);
+  state.unlockDraft.password = "";
+  await openDashboardFromPayload(payload, password);
+}
+
+async function applyImportedBackup(bundle) {
+  await saveWalletBundle(bundle);
+
+  state.session = null;
+  state.walletMeta = bundle.vaultMeta;
+  state.tokens = bundle.tokens;
+  state.tokenDiscoveryCursors = bundle.tokenDiscoveryCursors;
+  state.smartWallets = bundle.smartWallets;
+  state.recentRecipients = Array.isArray(bundle.recentRecipients) ? bundle.recentRecipients : [];
+  state.assets = [];
+  state.smartWalletAssets = [];
+  state.selectedSmartWalletAddress = "";
+  state.sendFlow = createEmptySendFlow();
+  state.smartWalletSendProgress = createSmartWalletSendProgress();
+  state.unlockDraft.password = "";
+  state.backupDraft = {
+    text: "",
+    fileName: "",
+  };
+  state.view = "unlock";
+  setNotice({
+    message: "Backup restored. Unlock with your existing wallet password.",
+  });
+}
+
+async function handleRestoreBackup() {
+  const bundle = parseBackupPayload(state.backupDraft.text);
+  await applyImportedBackup(bundle);
+}
+
+async function handleExportBackup() {
+  const bundle = await readWalletBundle();
+  const payload = createBackupExportPayload(bundle);
+  const filename = `ember-wallet-backup-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+
+  try {
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    setNotice({
+      message: "Encrypted backup exported successfully.",
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function handleAddToken() {
+  if (!state.session) {
+    throw new Error("Unlock the wallet before adding a token.");
+  }
+
+  const address = normalizeTokenAddress(state.addTokenDraft.address);
+  const token = await lookupTokenMetadata(address);
+  const tokens = mergeTokens([...state.tokens, token]);
+  await saveTokens(tokens);
+  state.tokens = tokens;
+  state.addTokenDraft.address = "";
+  state.addTokenOpen = false;
+  setNotice({
+    message: `${token.symbol} is now tracked in this wallet.`,
+  });
+  await refreshPortfolio({ preserveNotice: true });
+  await refreshSelectedSmartWalletPortfolio({ preserveNotice: true });
+}
+
+async function handleSend() {
+  if (!state.session) {
+    throw new Error("Unlock the wallet before sending assets.");
+  }
+
+  const asset = getSelectedAsset();
+  if (!asset) {
+    throw new Error("No asset is available to send yet.");
+  }
+
+  const recipient = state.sendDraft.recipient.trim();
+  const amount = state.sendDraft.amount.trim();
+
+  const result = await sendAsset({
+    account: state.session.account,
+    asset,
+    recipient,
+    amount,
+  });
+
+  state.sendDraft = {
+    assetId: asset.id,
+    recipient: "",
+    amount: "",
+  };
+  setNotice({
+    message: `${asset.symbol} sent successfully.`,
+    txLink: result.explorerUrl,
+  });
+  await persistRecentRecipientIfNew(recipient);
+  await refreshPortfolio({ preserveNotice: true });
+}
+
+async function handleSendFlowConfirm() {
+  if (!state.session) {
+    throw new Error("Unlock the wallet before sending assets.");
+  }
+
+  const asset = getSelectedAsset();
+  if (!asset) {
+    throw new Error("No asset is available to send yet.");
+  }
+
+  const recipient = state.sendDraft.recipient.trim();
+  const amount = state.sendDraft.amount.trim();
+  if (!recipient) {
+    throw new Error("Enter a recipient address first.");
+  }
+
+  if (!isValidAmount(amount)) {
+    throw new Error("Enter an amount greater than zero.");
+  }
+
+  state.sendFlow = {
+    ...state.sendFlow,
+    step: "processing",
+    status: "pending",
+    txLink: "",
+    detail: "Submitting transaction.",
+  };
+  render();
+
+  try {
+    const result = await sendAsset({
+      account: state.session.account,
+      asset,
+      recipient,
+      amount,
+    });
+
+    await persistRecentRecipientIfNew(recipient);
+    setNotice({
+      message: `${asset.symbol} sent successfully.`,
+      txLink: result.explorerUrl,
+    });
+
+    state.sendFlow = {
+      ...state.sendFlow,
+      step: "processing",
+      status: "success",
+      txLink: result.explorerUrl,
+      detail: `${asset.symbol} transfer confirmed.`,
+    };
+
+    state.sendDraft = {
+      assetId: asset.id,
+      recipient: "",
+      amount: "",
+    };
+
+    await refreshPortfolio({ preserveNotice: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Transaction failed.";
+    state.sendFlow = {
+      ...state.sendFlow,
+      step: "processing",
+      status: "error",
+      detail: message,
+      txLink: "",
+    };
+    setNotice({
+      error: message,
+    });
+  } finally {
+    render();
+  }
+}
+
+async function handleCreateSmartWallet() {
+  if (!state.session) {
+    throw new Error("Unlock the wallet before creating a smart wallet.");
+  }
+
+  if (!smartWalletFeatureReady()) {
+    throw new Error(
+      "The upgraded Sepolia smart-wallet factory is not configured yet. Deploy it and update src/smart-wallet-deployment.js before creating Lit-backed wallets.",
+    );
+  }
+
+  pushDebugEvent({
+    scope: "ui",
+    step: "handleCreateSmartWallet",
+    status: "start",
+    detail: {
+      owner: state.session.account.address,
+    },
+  });
+  const litConfig = await createLitBackedSigner({
+    account: state.session.account,
+    litAccountApiKey: state.smartWalletDraft.litAccountApiKey,
+    deploymentId: state.smartWalletDraft.deploymentId,
+    apiKey: state.smartWalletDraft.apiKey,
+    localVaultPassword: state.session.password,
+    onDebugEvent: pushDebugEvent,
+  });
+  const created = await createSmartWallet({
+    account: state.session.account,
+    coSignerAddress: litConfig.pkpEthAddress,
+    kind: "lit",
+    litConfig,
+    onDebugEvent: pushDebugEvent,
+  });
+
+  state.smartWallets = mergeSmartWalletRecords([...state.smartWallets, created]);
+  state.selectedSmartWalletAddress = created.walletAddress;
+  state.session.payload = upsertSmartWalletVault(state.session.payload, created);
+  await persistSessionPayload();
+  await saveSmartWallets(serializeSmartWalletsForStorage(state.smartWallets));
+  state.smartWalletDraft = {
+    litAccountApiKey: "",
+    deploymentId: "",
+    apiKey: "",
+  };
+  setNotice({
+    message: `Smart wallet ${shortAddress(created.walletAddress)} created with Lit PKP signer ${shortAddress(litConfig.pkpEthAddress)}.`,
+    txLink: created.txHash ? `${CHAIN.blockExplorers.default.url}/tx/${created.txHash}` : "",
+  });
+
+  // Show overlay and redirect independently — must not block handleSubmit's finally
+  // so isWorking resets and the button unlocks before the overlay appears.
+  const createdAddress = created.walletAddress;
+  setTimeout(async () => {
+    state.walletCreatedOverlay = { visible: true, address: createdAddress };
+    render();
+    await refreshSmartWallets({ preserveNotice: true });
+    setTimeout(() => {
+      state.walletCreatedOverlay = { visible: false, address: "" };
+      state.smartWalletView = "wallet";
+      render();
+    }, 1800);
+  }, 0);
+}
+
+async function handleSmartWalletSend() {
+  if (!state.session) {
+    throw new Error("Unlock the wallet before sending from a smart wallet.");
+  }
+
+  const smartWallet = getSelectedSmartWallet();
+  if (!smartWallet) {
+    throw new Error("Select a smart wallet first.");
+  }
+
+  const asset = getSelectedSmartWalletAsset();
+  if (!asset) {
+    throw new Error("No smart-wallet asset is available yet.");
+  }
+
+  const recipient = state.smartWalletSendDraft.recipient.trim();
+
+  if (!state.smartWalletSendDraft.csvText && state.smartWalletSendDraft.simulatedEmotion !== "manual") {
+    const simulated = simulatedCsvForEmotion(state.smartWalletSendDraft.simulatedEmotion);
+    state.smartWalletSendDraft.csvText = simulated.csvText;
+    state.smartWalletSendDraft.csvFileName = simulated.fileName;
+  }
+
+  if (!state.smartWalletSendDraft.csvText) {
+    throw new Error("Upload a CSV file before requesting Lit approval.");
+  }
+
+  beginSmartWalletSendProgress();
+  handleSmartWalletProgressEvent({
+    step: "validateRequest",
+    status: "running",
+  });
+
+  let sendError = null;
+  let refreshError = null;
+  let result = null;
+
+  pushDebugEvent({
+    scope: "ui",
+    step: "handleSmartWalletSend",
+    status: "start",
+    detail: {
+      walletAddress: smartWallet.walletAddress,
+      assetId: asset.id,
+    },
+  });
+  try {
+    const parsedCsv = parseTopCsvRow(state.smartWalletSendDraft.csvText);
+    const inferenceInputs = buildInferenceInputs(parsedCsv.csvRow);
+    const inputsSummary = summarizeInferenceInputs(inferenceInputs);
+    handleSmartWalletProgressEvent({
+      step: "validateRequest",
+      status: "success",
+      detail: `Using top row (1/${parsedCsv.dataRowCount}) · ${inputsSummary}`,
+    });
+
+    result = await executeSmartWalletSend({
+      account: state.session.account,
+      smartWallet,
+      asset,
+      recipient,
+      amount: state.smartWalletSendDraft.amount.trim(),
+      inputs: inferenceInputs,
+      localVaultPassword: state.session.password,
+      onDebugEvent: pushDebugEvent,
+      onProgressEvent: handleSmartWalletProgressEvent,
+    });
+
+    state.smartWalletSendDraft = {
+      assetId: asset.id,
+      recipient: "",
+      amount: "",
+      csvText: "",
+      csvFileName: "",
+      simulatedEmotion: "manual",
+    };
+    setNotice({
+      message: `${asset.symbol} sent from ${shortAddress(smartWallet.walletAddress)} after Lit approved prediction ${result.prediction}.`,
+      txLink: result.explorerUrl,
+    });
+    await persistRecentRecipientIfNew(recipient);
+  } catch (error) {
+    sendError = error;
+    const failedStep = progressStepForFailedStage(error?.failedStage);
+    const isInferenceBlock =
+      error?.failedStage === "inference" || error?.failedStage === "policy";
+    const uiMessage = isInferenceBlock
+      ? "Possible signs of stress or coercion detected — Lit PKP refused to sign."
+      : error instanceof Error
+        ? error.message
+        : String(error);
+    if (failedStep) {
+      if (isInferenceBlock) {
+        pushDebugEvent({
+          scope: "lit",
+          step: "litInference",
+          status: "blocked",
+          detail: uiMessage,
+        });
+      }
+      handleSmartWalletProgressEvent({
+        step: failedStep,
+        status: "error",
+        detail: {
+          message: uiMessage,
+        },
+      });
+    } else {
+      const activeStep = state.smartWalletSendProgress.steps.find((step) => step.status === "running");
+      handleSmartWalletProgressEvent({
+        step: activeStep?.id ?? "validateRequest",
+        status: "error",
+        detail: {
+          message: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  } finally {
+    try {
+      await refreshWalletTokensAndBalancesForTransfer(handleSmartWalletProgressEvent);
+    } catch (error) {
+      refreshError = error;
+      handleSmartWalletProgressEvent({
+        step: "refreshAssets",
+        status: "error",
+        detail: {
+          message: error instanceof Error ? error.message : String(error),
+        },
+      });
+      if (!sendError) {
+        sendError = error;
+      }
+    }
+  }
+
+  if (sendError || refreshError) {
+    completeSmartWalletSendProgress({
+      status: "failed",
+      summary:
+        sendError && refreshError
+          ? "Transfer failed and token refresh also failed."
+          : sendError
+            ? "Transfer failed. Token refresh still ran."
+            : "Transfer succeeded, but token refresh failed.",
+    });
+    render();
+    throw sendError ?? refreshError;
+  }
+
+  completeSmartWalletSendProgress({
+    status: "success",
+    summary: "Transfer confirmed and wallet tokens refreshed.",
+  });
+  render();
+}
+
+async function handleSubmit(formName) {
+  state.isWorking = true;
+  clearNotice();
+  render();
+
+  try {
+    if (formName === "create") {
+      await handleCreate();
+    } else if (formName === "import") {
+      await handleImport();
+    } else if (formName === "restore-backup" || formName === "import-backup") {
+      await handleRestoreBackup();
+      state.menuOpen = false;
+    } else if (formName === "unlock") {
+      await handleUnlock();
+    } else if (formName === "add-token") {
+      await handleAddToken();
+    } else if (formName === "send") {
+      await handleSend();
+    } else if (formName === "smart-wallet") {
+      await handleCreateSmartWallet();
+    } else if (formName === "smart-wallet-send") {
+      await handleSmartWalletSend();
+    }
+  } catch (error) {
+    pushDebugEvent({
+      scope: "ui",
+      step: formName,
+      status: "error",
+      detail: {
+        message: error instanceof Error ? error.message : "Something went wrong.",
+      },
+    });
+    setNotice({
+      error: error instanceof Error ? error.message : "Something went wrong.",
+    });
+  } finally {
+    state.isWorking = false;
+    render();
+  }
+}
+
+function updateDraft(target) {
+  const draftKey = target.dataset.draft;
+  if (!draftKey || !(draftKey in state)) {
+    return;
+  }
+
+  state[draftKey][target.name] = target.value;
+}
+
+function applySelectedSimulatedEmotion() {
+  const selected = state.smartWalletSendDraft.simulatedEmotion;
+  if (!selected || selected === "manual") {
+    return;
+  }
+
+  const simulated = simulatedCsvForEmotion(selected);
+  state.smartWalletSendDraft.csvText = simulated.csvText;
+  state.smartWalletSendDraft.csvFileName = simulated.fileName;
+  setNotice({
+    message: simulated.summary,
+  });
+}
+
+app.addEventListener("input", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement) && !(target instanceof HTMLSelectElement)) {
+    return;
+  }
+
+  if (target.type === "file") {
+    return;
+  }
+
+  updateDraft(target);
+
+  if (target instanceof HTMLSelectElement && target.dataset.draft === "smartWalletSendDraft" && target.name === "simulatedEmotion") {
+    applySelectedSimulatedEmotion();
+    render();
+    return;
+  }
+
+  if (target.dataset.draft === "sendDraft" || target.dataset.draft === "smartWalletSendDraft") {
+    const savedId = target.id;
+    const savedStart = target.selectionStart ?? 0;
+    const savedEnd = target.selectionEnd ?? 0;
+    render();
+    if (savedId) {
+      const refocused = document.getElementById(savedId);
+      if (refocused) {
+        refocused.focus();
+        try { refocused.setSelectionRange(savedStart, savedEnd); } catch (_) {}
+      }
+    }
+  }
+});
+
+app.addEventListener("change", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLSelectElement)) {
+    return;
+  }
+
+  if (target instanceof HTMLSelectElement) {
+    updateDraft(target);
+    if (target.dataset.draft === "smartWalletSendDraft" && target.name === "simulatedEmotion") {
+      applySelectedSimulatedEmotion();
+      render();
+    }
+    return;
+  }
+
+  if (target.dataset.setting === "developerMode") {
+    state.developerMode = target.checked;
+    await saveDeveloperMode(state.developerMode);
+    render();
+    return;
+  }
+
+  if (target.type !== "file") {
+    return;
+  }
+
+  const fileKind = target.dataset.fileKind ?? "";
+  const file = target.files?.[0];
+  if (!file) {
+    if (fileKind === "wallet-backup") {
+      state.backupDraft = {
+        text: "",
+        fileName: "",
+      };
+    } else {
+      state.smartWalletSendDraft.csvText = "";
+      state.smartWalletSendDraft.csvFileName = "";
+      state.smartWalletSendDraft.simulatedEmotion = "manual";
+    }
+    render();
+    return;
+  }
+
+  try {
+    const text = await file.text();
+    if (fileKind === "wallet-backup") {
+      state.backupDraft = {
+        text,
+        fileName: file.name,
+      };
+    } else {
+      state.smartWalletSendDraft.csvText = text;
+      state.smartWalletSendDraft.csvFileName = file.name;
+      state.smartWalletSendDraft.simulatedEmotion = "manual";
+    }
+    clearNotice();
+  } catch (error) {
+    setNotice({
+      error:
+        error instanceof Error
+          ? error.message
+          : fileKind === "wallet-backup"
+            ? "Could not read the backup file."
+            : "Could not read the CSV file.",
+    });
+  }
+
+  render();
+});
+
+app.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof Element)) {
+    return;
+  }
+
+  const button = target.closest("[data-action]");
+  if (!button) {
+    return;
+  }
+
+  const action = button.dataset.action;
+
+  if (action === "switch-mode") {
+    state.onboardingMode = button.dataset.mode ?? "create";
+    clearNotice();
+    render();
+    return;
+  }
+
+  if (action === "switch-home-tab") {
+    state.homeTab = button.dataset.tab ?? "assets";
+    clearNotice();
+    render();
+    return;
+  }
+
+  if (action === "open-send-flow") {
+    openSendFlow({
+      assetId: button.dataset.assetId ?? "",
+    });
+    clearNotice();
+    render();
+    return;
+  }
+
+  if (action === "open-smart-wallet-send-from-top") {
+    state.smartWalletSendOpen = true;
+    state.smartWalletSendFlow = { step: "recipient", status: "idle", txLink: "", detail: "" };
+    clearNotice();
+    render();
+    return;
+  }
+
+  if (action === "close-send-flow") {
+    if (state.sendFlow.step === "processing" && state.sendFlow.status === "pending") {
+      return;
+    }
+
+    closeSendFlow();
+    render();
+    return;
+  }
+
+  if (action === "send-flow-back") {
+    if (state.sendFlow.step === "confirm") {
+      state.sendFlow.step = "amount";
+    } else if (state.sendFlow.step === "processing" && state.sendFlow.status === "error") {
+      state.sendFlow.step = "confirm";
+      state.sendFlow.status = "idle";
+      state.sendFlow.detail = "";
+    }
+    render();
+    return;
+  }
+
+  if (action === "send-flow-next-recipient") {
+    const recipient = state.sendDraft.recipient.trim();
+    if (!recipient) {
+      setNotice({
+        error: "Enter a recipient address first.",
+      });
+      render();
+      return;
+    }
+
+    if (!isAddress(recipient)) {
+      setNotice({
+        error: "Enter a valid 0x recipient address.",
+      });
+      render();
+      return;
+    }
+
+    clearNotice();
+    state.sendFlow.step = "asset";
+    render();
+    return;
+  }
+
+  if (action === "send-flow-select-recipient") {
+    const recipient = button.dataset.recipient ?? "";
+    if (recipient) {
+      state.sendDraft.recipient = recipient;
+      clearNotice();
+      state.sendFlow.step = "asset";
+      render();
+    }
+    return;
+  }
+
+  if (action === "send-flow-paste") {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text?.trim()) {
+        throw new Error("Clipboard is empty.");
+      }
+
+      state.sendDraft.recipient = text.trim();
+      clearNotice();
+    } catch (error) {
+      setNotice({
+        error: error instanceof Error ? error.message : "Could not read clipboard text.",
+      });
+    }
+    render();
+    return;
+  }
+
+  if (action === "send-flow-scan-qr") {
+    setNotice({
+      message: "QR scan is coming soon. Paste an address for now.",
+    });
+    render();
+    return;
+  }
+
+  if (action === "send-flow-sort") {
+    setNotice({
+      message: "Token sorting is coming next. For now, tokens are shown in loaded order.",
+    });
+    render();
+    return;
+  }
+
+  if (action === "send-flow-search") {
+    setNotice({
+      message: "Token search is coming next. Select from the currently loaded list.",
+    });
+    render();
+    return;
+  }
+
+  if (action === "send-flow-help") {
+    setNotice({
+      message: "Confirming will submit this transaction on-chain. You can still go back to edit the amount first.",
+    });
+    render();
+    return;
+  }
+
+  if (action === "send-flow-edit-recipient") {
+    state.sendFlow.step = "recipient";
+    render();
+    return;
+  }
+
+  if (action === "send-flow-select-asset") {
+    if (button.dataset.assetId) {
+      state.sendDraft.assetId = button.dataset.assetId;
+      state.sendDraft.amount = "";
+      state.sendFlow.step = "amount";
+      clearNotice();
+      render();
+    }
+    return;
+  }
+
+  if (action === "send-flow-change-asset") {
+    state.sendFlow.step = "asset";
+    render();
+    return;
+  }
+
+  if (action === "send-flow-use-max") {
+    const asset = getSelectedAsset();
+    if (!asset) {
+      return;
+    }
+
+    state.sendDraft.amount = formatTokenAmountInput(asset.displayBalance);
+    render();
+    return;
+  }
+
+  if (action === "send-flow-keypad") {
+    const key = button.dataset.key ?? "";
+    applyKeypadInput(key);
+    render();
+    return;
+  }
+
+  if (action === "send-flow-review") {
+    if (!isValidAmount(state.sendDraft.amount)) {
+      setNotice({
+        error: "Enter an amount greater than zero.",
+      });
+      render();
+      return;
+    }
+
+    clearNotice();
+    state.sendFlow.step = "confirm";
+    state.sendFlow.status = "idle";
+    render();
+    return;
+  }
+
+  if (action === "send-flow-confirm") {
+    await handleSendFlowConfirm();
+    return;
+  }
+
+  if (action === "send-flow-done") {
+    closeSendFlow();
+    clearNotice();
+    render();
+    return;
+  }
+
+  if (action === "select-smart-wallet") {
+    state.selectedSmartWalletAddress = button.dataset.wallet ?? "";
+    state.smartWalletSendProgress = createSmartWalletSendProgress();
+    clearNotice();
+    await refreshSelectedSmartWalletPortfolio({ preserveNotice: true });
+    return;
+  }
+
+  if (action === "pick-smart-wallet-asset") {
+    if (button.dataset.assetId) {
+      state.smartWalletSendDraft.assetId = button.dataset.assetId;
+      state.smartWalletSendOpen = true;
+      state.smartWalletSendFlow = { step: "recipient", status: "idle", txLink: "", detail: "" };
+      clearNotice();
+      render();
+    }
+    return;
+  }
+
+  if (action === "close-smart-wallet-send") {
+    if (state.smartWalletSendFlow.step === "processing" && state.smartWalletSendFlow.status === "pending") {
+      return;
+    }
+    state.smartWalletSendOpen = false;
+    state.smartWalletSendFlow = { step: "recipient", status: "idle", txLink: "", detail: "" };
+    render();
+    return;
+  }
+
+  if (action === "sw-send-flow-back") {
+    const swStep = state.smartWalletSendFlow.step;
+    if (swStep === "asset") state.smartWalletSendFlow.step = "recipient";
+    else if (swStep === "amount") state.smartWalletSendFlow.step = "asset";
+    else if (swStep === "csv") state.smartWalletSendFlow.step = "amount";
+    else if (swStep === "processing" && state.smartWalletSendFlow.status === "error") {
+      state.smartWalletSendFlow.step = "csv";
+      state.smartWalletSendFlow.status = "idle";
+      state.smartWalletSendFlow.detail = "";
+    }
+    render();
+    return;
+  }
+
+  if (action === "sw-send-flow-next-recipient") {
+    const recipient = state.smartWalletSendDraft.recipient.trim();
+    if (!recipient) { render(); return; }
+    if (!isAddress(recipient)) {
+      setNotice({ error: "Enter a valid 0x recipient address." });
+      render();
+      return;
+    }
+    clearNotice();
+    state.smartWalletSendFlow.step = "asset";
+    render();
+    return;
+  }
+
+  if (action === "sw-send-flow-select-asset") {
+    if (button.dataset.assetId) {
+      state.smartWalletSendDraft.assetId = button.dataset.assetId;
+    }
+    state.smartWalletSendFlow.step = "amount";
+    render();
+    return;
+  }
+
+  if (action === "sw-send-flow-next-amount") {
+    if (!isValidAmount(state.smartWalletSendDraft.amount)) {
+      setNotice({ error: "Enter an amount greater than zero." });
+      render();
+      return;
+    }
+    clearNotice();
+    state.smartWalletSendFlow.step = "csv";
+    render();
+    return;
+  }
+
+  if (action === "sw-send-flow-use-max") {
+    const swAsset = getSelectedSmartWalletAsset();
+    if (swAsset) {
+      state.smartWalletSendDraft.amount = formatTokenAmountInput(swAsset.displayBalance);
+      render();
+    }
+    return;
+  }
+
+  if (action === "sw-send-flow-paste") {
+    try {
+      const text = await navigator.clipboard.readText();
+      state.smartWalletSendDraft.recipient = text.trim();
+      render();
+    } catch { /* ignore */ }
+    return;
+  }
+
+  if (action === "sw-send-flow-confirm") {
+    state.smartWalletSendFlow.step = "processing";
+    state.smartWalletSendFlow.status = "pending";
+    state.smartWalletSendFlow.txLink = "";
+    state.smartWalletSendFlow.detail = "";
+    beginSmartWalletSendProgress();
+    render();
+    state.isWorking = true;
+    handleSmartWalletSend()
+      .then(() => {
+        state.smartWalletSendFlow.status = "success";
+        state.smartWalletSendFlow.txLink = state.txLink || "";
+      })
+      .catch((err) => {
+        state.smartWalletSendFlow.status = "error";
+        state.smartWalletSendFlow.detail = err instanceof Error ? err.message : String(err);
+      })
+      .finally(() => {
+        state.isWorking = false;
+        render();
+      });
+    return;
+  }
+
+  if (action === "sw-send-flow-done") {
+    state.smartWalletSendOpen = false;
+    state.smartWalletSendFlow = { step: "recipient", status: "idle", txLink: "", detail: "" };
+    state.smartWalletSendProgress = createSmartWalletSendProgress();
+    clearNotice();
+    render();
+    return;
+  }
+
+  if (action === "copy-address") {
+    const address = state.session?.account.address ?? state.walletMeta?.address ?? "";
+    if (!address) return;
+    try {
+      await navigator.clipboard.writeText(address);
+    } catch {
+      // Fallback: use a hidden textarea (reliable in extension popup context)
+      const el = document.createElement("textarea");
+      el.value = address;
+      el.style.cssText = "position:fixed;opacity:0;pointer-events:none";
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand("copy");
+      document.body.removeChild(el);
+    }
+    state.addressCopied = true;
+    render();
+    setTimeout(() => {
+      state.addressCopied = false;
+      render();
+    }, 2000);
+    return;
+  }
+
+  if (action === "copy-smart-wallet-address") {
+    const smartWallet = getSelectedSmartWallet();
+    if (!smartWallet) return;
+    try {
+      await navigator.clipboard.writeText(smartWallet.walletAddress);
+    } catch {
+      const el = document.createElement("textarea");
+      el.value = smartWallet.walletAddress;
+      el.style.cssText = "position:fixed;opacity:0;pointer-events:none";
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand("copy");
+      document.body.removeChild(el);
+    }
+    state.smartWalletAddressCopied = true;
+    render();
+    setTimeout(() => {
+      state.smartWalletAddressCopied = false;
+      render();
+    }, 2000);
+    return;
+  }
+
+  if (action === "toggle-smart-wallet-header") {
+    state.smartWalletHeaderExpanded = !state.smartWalletHeaderExpanded;
+    render();
+    return;
+  }
+
+  if (action === "back-to-create-wallet") {
+    state.smartWalletView = "create";
+    render();
+    return;
+  }
+
+  if (action === "open-menu") {
+    state.menuOpen = true;
+    render();
+    return;
+  }
+
+  if (action === "close-menu") {
+    state.menuOpen = false;
+    render();
+    return;
+  }
+
+  if (action === "toggle-add-token") {
+    state.addTokenOpen = !state.addTokenOpen;
+    render();
+    return;
+  }
+
+  if (action === "onboarding-choose") {
+    state.onboardingStep = button.dataset.step ?? "choose";
+    clearNotice();
+    render();
+    return;
+  }
+
+  if (action === "onboarding-back") {
+    state.onboardingStep = "choose";
+    clearNotice();
+    render();
+    return;
+  }
+
+  if (action === "toggle-phrase") {
+    state.phraseRevealed = !state.phraseRevealed;
+    render();
+    return;
+  }
+
+  if (action === "copy-phrase") {
+    try {
+      await navigator.clipboard.writeText(state.recoveryPhrase);
+      state.phraseCopied = true;
+      render();
+      setTimeout(() => {
+        state.phraseCopied = false;
+        render();
+      }, 2000);
+    } catch (error) {
+      setNotice({ error: "Could not copy to clipboard." });
+      render();
+    }
+    return;
+  }
+
+  if (action === "finish-recovery") {
+    // Flush the deferred vault to storage now that the user has confirmed
+    if (state.pendingVaultBundle) {
+      await saveWalletBundle({
+        vault: state.pendingVaultBundle.vault,
+        vaultMeta: state.pendingVaultBundle.vaultMeta,
+        tokens: [],
+        smartWallets: [],
+        tokenDiscoveryCursors: {},
+        recentRecipients: [],
+      });
+      state.pendingVaultBundle = null;
+    }
+    await openDashboardFromPayload(state.session.payload, state.session.password);
+    return;
+  }
+
+  if (action === "lock") {
+    state.session = null;
+    state.assets = [];
+    state.smartWalletAssets = [];
+    state.sendFlow = createEmptySendFlow();
+    state.isDiscoveringTokens = false;
+    state.isSmartWalletAssetsLoading = false;
+    state.smartWalletSendProgress = createSmartWalletSendProgress();
+    state.unlockDraft.password = "";
+    clearNotice();
+    clearUnlockSession().catch(() => {});
+    state.view = "unlock";
+    render();
+    return;
+  }
+
+  if (action === "refresh") {
+    await refreshDashboard({ waitForDiscovery: true });
+    return;
+  }
+
+  if (action === "export-backup") {
+    state.menuOpen = false;
+    try {
+      await handleExportBackup();
+    } catch (error) {
+      setNotice({
+        error: error instanceof Error ? error.message : "Could not export backup.",
+      });
+    }
+    render();
+    return;
+  }
+
+  if (action === "copy-debug-log") {
+    try {
+      await copyDebugLog();
+      setNotice({
+        message: `Copied ${state.debugLog.length} debug event${state.debugLog.length === 1 ? "" : "s"} to the clipboard.`,
+      });
+    } catch (error) {
+      setNotice({
+        error: error instanceof Error ? error.message : "Could not copy the debug log.",
+      });
+    }
+    render();
+    return;
+  }
+
+  if (action === "clear-debug-log") {
+    state.debugLog = [];
+    render();
+  }
+});
+
+app.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const target = event.target;
+  if (!(target instanceof HTMLFormElement)) {
+    return;
+  }
+
+  await handleSubmit(target.dataset.form);
+});
+
+async function bootstrap() {
+  render();
+
+  try {
+    const stored = await readWalletBundle();
+    state.developerMode = await readDeveloperMode();
+    state.walletMeta = stored.vaultMeta;
+    state.tokens = stored.tokens;
+    state.tokenDiscoveryCursors = stored.tokenDiscoveryCursors ?? {};
+    state.recentRecipients = Array.isArray(stored.recentRecipients) ? stored.recentRecipients : [];
+    state.smartWallets = stored.smartWallets;
+
+    if (stored.vault && stored.vaultMeta) {
+      // Try to resume an existing unlocked session (within 10-minute window)
+      const resumeSession = await readUnlockSession();
+      if (resumeSession) {
+        await openDashboardFromPayload(resumeSession.payload, resumeSession.password);
+        return;
+      }
+      state.view = "unlock";
+    } else {
+      state.view = "onboarding";
+    }
+  } catch (error) {
+    state.view = "onboarding";
+    setNotice({
+      error: error instanceof Error ? error.message : "Could not load extension storage.",
+    });
+  }
+
+  render();
+}
+
+bootstrap();
