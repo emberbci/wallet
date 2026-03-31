@@ -1,6 +1,6 @@
 # Ember Wallet
 
-Ember is an anti-coercion smart contract wallet built for the intersection of neurotech, digital rights, and programmable cryptography. It is designed around one core idea: traditional wallets protect against remote attackers, but they do almost nothing when the threat is physical coercion. Ember adds a biometric panic check directly into the transaction flow, turning live cognitive state into a security condition before assets can move.
+Ember is an anti-coercion smart contract wallet built for the intersection of neurotech, digital rights, and programmable cryptography. It is designed around one core idea: traditional wallets protect against remote digital attackers, but they do almost nothing when the threat is physical coercion. Ember adds a biometric panic check directly into the transaction flow, turning live cognitive state into a security condition before assets can move.
 
 The current prototype is a browser extension wallet for Ethereum Sepolia. A user first creates or imports a normal wallet in the extension, then creates a Lit-backed smart wallet where their extension wallet is signer one and a Lit PKP is signer two. When the user wants to send funds from the smart wallet, Ember requires both signatures. The user signs locally, then uploads fresh BCI-derived readings in CSV form. A Lit Action securely decrypts the user’s Impulse AI inference configuration, sends the feature payload to the Impulse inference API, and only returns the second signature if the model approves the transaction. If the model detects stress, fear, panic, stale data, or an invalid result, the Lit signer refuses to sign and the transaction cannot execute.
 
@@ -15,9 +15,9 @@ Ember introduces a real-time neuro-biometric approval layer. Instead of trusting
 Ember uses a 2-of-2 multisig smart wallet:
 
 - Signer one is the user’s normal extension wallet.
-- Signer two is a Lit PKP managed through Lit Protocol V1 on the Naga test network.
+- Signer two is a Lit PKP managed through Lit Protocol 
 
-When the user creates a Lit-backed smart wallet:
+The user creates a multisig smart wallet:
 
 1. The extension authenticates to Lit with the user’s wallet.
 2. Ember mints a PKP that will act as the second signer.
@@ -28,7 +28,7 @@ When the user creates a Lit-backed smart wallet:
 
 When the user sends a transaction from the smart wallet:
 
-1. The user prepares a send and uploads a one-row CSV containing fresh BCI-derived features.
+1. The user prepares a send and uploads a CSV containing fresh BCI-derived features.
 2. Ember parses the CSV into the inference input object expected by the Impulse AI endpoint.
 3. Ember computes the smart-wallet execution hash and signs it locally with signer one.
 4. Ember sends the execution hash, encrypted inference config, and parsed feature payload to the Lit Action.
@@ -39,35 +39,101 @@ When the user sends a transaction from the smart wallet:
 
 This means a coerced attacker can force a user to open the wallet, but they still cannot move assets unless the biometric and AI-based panic check passes.
 
-## Why This Fits The Challenge Tracks
 
-### NeuroTrack
 
-Ember sits directly at the boundary of BCI, cognition, and computation. It treats neural or neuro-adjacent biometric readings as a security primitive, not just an analytics signal. The project is grounded in cognitive sovereignty: the user’s live mental state becomes part of the consent model for moving value. It also raises exactly the kinds of design questions the track highlights, including neural data rights, safe augmentation, freshness of cognitive data, and how neurotech should interact with high-stakes digital systems.
+### NeuroTrack Integration
 
-### Infrastructure & Digital Rights
+Ember sits directly at the boundary of BCI, cognition, and computation. It treats neural or neuro-adjacent biometric readings as a security primitive, not just an analytics signal. The project is grounded in cognitive sovereignty: the user’s live mental state becomes part of the consent model for moving value. 
 
-Ember is also an infrastructure and digital-rights project. It uses decentralized key management, privacy-preserving secret handling, and programmable cryptography to give users stronger control over when value can leave their custody. Sensitive inference credentials are encrypted and are intended to be decrypted only inside Lit’s secure execution flow, rather than exposed to the extension or backend operators.
 
-### Lit Protocol Challenge
+### Lit Protocol Integration
 
-This prototype demonstrably uses Lit Protocol V1 (Naga):
+Source: [`src/lib/lit`](https://github.com/emberbci/wallet/tree/main/src/lib/lit)
 
 - PKPs for decentralized second-signer key management
 - Lit Actions for programmable signing policy
 - Lit encryption for protecting inference configuration
 
-This is not a cosmetic integration. Lit is the core enforcement layer that decides whether the second signature exists at all.
 
-### Impulse AI Challenge
+### Impulse AI Integration
 
 Ember uses Impulse AI as a cognitive oracle in the transaction approval flow. The prototype is built around the Impulse-hosted inference endpoint pattern, where the model is deployed once and later called with feature inputs derived from CSV-based BCI readings. Impulse is what transforms raw biometric input into a transaction gating decision that the Lit Action can enforce cryptographically.
+
+## Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Ext as Ember Extension
+    participant Vault as Encrypted Vault
+    participant Lit as Lit Protocol Naga
+    participant PKP as Lit PKP
+    participant Action as Lit Action
+    participant Factory as Smart Wallet Factory
+    participant Wallet as 2 of 2 Smart Wallet
+    participant API as Impulse AI API
+    participant Chain as Sepolia
+
+    User->>Ext: Create or import base wallet
+    Ext->>Vault: Encrypt and store wallet secrets
+    Vault-->>Ext: Wallet vault saved
+    Ext-->>User: Base wallet ready
+
+    User->>Ext: Open Smart Wallets and enter deployment ID + API key
+    Ext->>Lit: Authenticate with base wallet
+    Lit-->>Ext: Session approved
+    Ext->>Lit: Mint PKP for signer two
+    Lit-->>PKP: Create PKP
+    PKP-->>Ext: Return PKP address
+
+    Ext->>Lit: Encrypt inference config
+    Note over Ext,Lit: Config includes endpoint, deployment ID, and API key
+    Lit-->>Ext: Ciphertext and metadata
+    Ext->>Vault: Store encrypted Lit config in wallet vault
+
+    Ext->>Lit: Deploy Lit Action and bind PKP
+    Lit-->>Action: Register action
+    Action-->>Ext: Action ID returned
+
+    Ext->>Factory: Create smart wallet with [EOA, PKP]
+    Factory->>Wallet: Deploy deterministic 2 of 2 wallet
+    Wallet-->>Factory: Wallet address
+    Factory-->>Ext: Wallet created event/address
+    Ext-->>User: Smart wallet ready
+
+    User->>Ext: Initiate transfer from smart wallet
+    User->>Ext: Upload fresh BCI CSV
+    Ext->>Ext: Parse CSV into inference inputs
+    Ext->>Wallet: Read nonce and build execution hash
+    Wallet-->>Ext: Nonce / execution hash
+    Ext->>Ext: Sign hash with base wallet
+
+    Ext->>Action: Request co-sign with encrypted config, tx hash, and BCI inputs
+    Action->>Lit: Decrypt config inside secure execution
+    Lit-->>Action: Plaintext secrets in TEE only
+    Action->>API: Call inference endpoint
+    API-->>Action: prediction result
+
+    alt prediction == 1
+        Action->>PKP: Sign transaction hash
+        PKP-->>Action: PKP signature
+        Action-->>Ext: Return approval and signature
+        Ext->>Wallet: Submit execute with both signatures
+        Wallet->>Chain: Execute transfer
+        Chain-->>Wallet: Transaction confirmed
+        Wallet-->>Ext: Success
+        Ext-->>User: Transfer completed
+    else prediction == 0 or -1 or invalid
+        Action-->>Ext: Deny signature
+        Ext-->>User: Transfer blocked for safety
+    end
+```
 
 ## Technical Architecture
 
 ### Extension Layer
 
-The browser extension is the user-facing wallet shell. It handles:
+The browser extension is the user-facing wallet. It handles:
 
 - wallet creation and import
 - encrypted local vault storage
@@ -88,11 +154,11 @@ The smart wallet is a deterministic 2-of-2 wallet contract deployed via a factor
 - strict ordered-signature validation
 - replay protection
 
-The upgraded wallet executes arbitrary ETH or ERC-20 transfers only when both the user and the Lit PKP have signed the same execution hash.
+The wallet executes arbitrary ETH or ERC-20 transfers only when both the user and the Lit PKP have signed the same execution hash.
 
 ### Lit Layer
 
-Lit Protocol V1 on Naga provides:
+Lit Protocol is used for:   
 
 - PKP generation for signer two
 - Lit Action execution as the transaction policy engine
@@ -111,51 +177,9 @@ Impulse AI is used as the inference engine that evaluates the uploaded biometric
 - `fft_511_a`
 - `fft_556_a`
 
-Additional features may also be passed through. Missing supported features are sent as `null`.
 
 The Impulse response is expected to include a `prediction` field, and the current prototype allows execution only when `prediction === 1`.
 
-## Safety, Privacy, And Ethics
-
-Ember is intentionally built around safety-sensitive assumptions:
-
-- Biometric data is uploaded only at sign time and is not intended to be stored long term by the extension.
-- Impulse inference credentials are encrypted for Lit-based access rather than kept as plain reusable config.
-- The system is fail-closed. Any invalid result, stale data, API error, or denied prediction blocks the transaction.
-- The architecture is explicitly designed around anti-coercion and cognitive liberty, not behavior profiling or continuous surveillance.
-
-This is still an experimental prototype. It should be treated as a research system exploring how neurotech and decentralized cryptography can be combined responsibly in high-stakes financial workflows.
-
-## Current Prototype Features
-
-- Create a base wallet from a mnemonic
-- Import a wallet from mnemonic or private key
-- Encrypt the base wallet vault locally
-- Track Sepolia ETH and manually added ERC-20 tokens
-- Send ETH and ERC-20 tokens from the base wallet
-- Discover smart wallets from configured factories
-- Create Lit-backed smart wallets from the extension flow
-- Upload a CSV and request Lit-gated approval for smart-wallet sends
-- Block execution when the Lit/Impulse path does not approve
-
-## Project Status
-
-The Lit-backed wallet flow and upgraded smart-wallet execution path are implemented in the repo, but the upgraded Sepolia smart-wallet factory still needs to be deployed and configured before end-to-end Lit wallet creation is enabled in the UI.
-
-Right now:
-
-- legacy smart wallets can still be discovered
-- the new Lit-backed creation flow is wired in
-- the upgraded factory address in `src/smart-wallet-deployment.js` must be updated after deployment
-
-## Repository Structure
-
-- `src/popup.js` - extension UI and state flow
-- `src/lib/lit.js` - Lit PKP, encryption, auth-context, and Lit Action integration
-- `src/lib/smart-wallets.js` - smart-wallet creation, discovery, and Lit-gated execution
-- `src/lib/csv.js` - CSV parsing and inference input mapping
-- `contracts/src/Wallet.sol` - upgraded 2-of-2 execution wallet
-- `contracts/src/WalletFactory.sol` - deterministic factory deployment
 
 ## Local Setup
 
@@ -171,64 +195,10 @@ npm install --legacy-peer-deps
 npm run build
 ```
 
-3. Build and test the contracts:
-
-```bash
-npm run contracts:build
-npm run contracts:test
-```
-
-4. Load the extension:
+3. Load the extension:
 
 - Open Chrome or Chromium
 - Go to `chrome://extensions`
 - Enable Developer Mode
 - Load either the repo root or the `dist` directory as an unpacked extension
 
-## Deploying The Upgraded Smart Wallet Factory
-
-Deploy the upgraded factory with:
-
-```bash
-PRIVATE_KEY=... npm run contracts:deploy:sepolia
-```
-
-After deployment, update `src/smart-wallet-deployment.js` with:
-
-- the new factory address
-- the deployment block number
-
-This is required for Lit-backed wallet creation and on-chain discovery of the upgraded wallet format.
-
-## Lit And Impulse Configuration
-
-To use the Lit-backed wallet flow, the user needs:
-
-- a funded base wallet in the extension
-- an Impulse AI deployment ID
-- an Impulse AI API key
-
-At wallet creation time, Ember uses those values to generate the Lit-backed second signer and encrypted inference configuration. At sign time, the user uploads a one-row CSV of biometric features, and the Lit Action uses the Impulse endpoint to decide whether the second signature should exist.
-
-## Demo Expectations
-
-For a full challenge submission, the project should be accompanied by:
-
-- a working prototype or demo
-- a public GitHub repository
-- this documentation
-- a 2-5 minute demo video showing wallet creation, CSV upload, inference gating, and transaction allow/deny behavior
-
-## Sponsor Technologies Used
-
-- Lit Protocol V1 (Naga)
-- Lit PKPs
-- Lit Actions
-- Lit encryption and programmable signing
-- Impulse AI inference API
-- Ethereum Sepolia
-- Browser extension wallet UX
-
-## Conceptual Framing
-
-Ember is ultimately a cognitive sovereignty wallet: a wallet that does not just ask, “do you have the key?” but also asks, “are you safe enough to use it right now?” It combines decentralized key management, AI inference, and live biometric context into a programmable safety rail for self-custody, exploring how neurotech can be applied to digital rights, anti-coercion infrastructure, and human-centered crypto security.
